@@ -38,11 +38,11 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
-    'admin',
-    'labTech',
-    'pharmacist',
-    'doctor',
-    'receptionist',
+    'admin-app',
+    'labTech-app',
+    'pharmacist-app',
+    'doctor-app',
+    'receptionist-app',
 ]
 
 MIDDLEWARE = [
