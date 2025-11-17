@@ -41,7 +41,7 @@ INSTALLED_APPS = [
     'adminapp',
     'doctorapp',
     'pharmacistapp',
-    'doctorapp',
+    'labtechapp',
     'receptionistapp',
 ]
 
