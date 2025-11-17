@@ -1,5 +1,5 @@
 from django.db import models
-from doctor.models import Consultation
+from doctorapp.models import Consultation
 
 
 class LabTest(models.Model):

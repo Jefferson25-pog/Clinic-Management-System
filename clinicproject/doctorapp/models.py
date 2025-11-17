@@ -1,6 +1,6 @@
 from django.db import models
-from admin.models import Staff, Department
-from receptionist.models import Patient
+from adminapp.models import Staff, Department
+from receptionistapp.models import Patient
 
 
 class Doctor(models.Model):
