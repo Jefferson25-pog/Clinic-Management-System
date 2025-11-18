@@ -26,9 +26,9 @@ INSTALLED_APPS = [
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'demo_db2',
-        'USER': 'demo_user',
-        'PASSWORD': 'demo123',
+        'NAME': 'clinic_management_db',
+        'USER': 'jass',
+        'PASSWORD': 'jass123',
         'HOST': 'localhost',
         'PORT': 3306,
     }
