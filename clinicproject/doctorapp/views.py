@@ -75,6 +75,57 @@ class AppointmentDetailsViewSet(viewsets.ReadOnlyModelViewSet):
             return Response(serializer.data)
         return Response([])
 
+    @action(detail=True, methods=['post'])
+    def update_status(self, request, pk=None):
+        """Update appointment status (Scheduled → Completed/Cancelled)"""
+        if hasattr(request.user, 'staff_details') and request.user.staff_details.Role == 'Doctor':
+            try:
+                appointment = self.get_object()
+                new_status = request.data.get('status')
+                
+                # Validate status
+                valid_statuses = ['Scheduled', 'Completed', 'Cancelled']
+                if new_status not in valid_statuses:
+                    return Response(
+                        {'error': f'Invalid status. Must be one of: {", ".join(valid_statuses)}'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                
+                # Update status
+                appointment.Status = new_status
+                appointment.save()
+                
+                serializer = self.get_serializer(appointment)
+                return Response({
+                    'message': f'Appointment status updated to {new_status}',
+                    'appointment': serializer.data
+                })
+                
+            except AppointmentDetails.DoesNotExist:
+                return Response({'error': 'Appointment not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({'error': 'Doctor not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    @action(detail=True, methods=['post'])
+    def mark_completed(self, request, pk=None):
+        """Mark appointment as completed (convenience method)"""
+        if hasattr(request.user, 'staff_details') and request.user.staff_details.Role == 'Doctor':
+            try:
+                appointment = self.get_object()
+                
+                # Update status to completed
+                appointment.Status = 'Completed'
+                appointment.save()
+                
+                serializer = self.get_serializer(appointment)
+                return Response({
+                    'message': 'Appointment marked as completed',
+                    'appointment': serializer.data
+                })
+                
+            except AppointmentDetails.DoesNotExist:
+                return Response({'error': 'Appointment not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({'error': 'Doctor not found'}, status=status.HTTP_404_NOT_FOUND)
+
 class ConsultationDetailsViewSet(viewsets.ModelViewSet):
     queryset = ConsultationDetails.objects.all()
     serializer_class = ConsultationDetailsSerializer
@@ -87,21 +138,42 @@ class ConsultationDetailsViewSet(viewsets.ModelViewSet):
             return ConsultationDetails.objects.filter(DOC_ID=doctor_id)
         return ConsultationDetails.objects.none()
 
+    def perform_create(self, serializer):
+        """Auto-update appointment status when consultation is created"""
+        consultation = serializer.save()
+        
+        # Update the associated appointment status to 'Completed'
+        appointment = consultation.TOKEN_NO
+        appointment.Status = 'Completed'
+        appointment.save()
+
     @action(detail=True, methods=['post'])
     def create_consultation(self, request, pk=None):
-        """Create consultation from appointment"""
-        appointment = AppointmentDetails.objects.get(TOKEN_NO=pk)
-        consultation_data = request.data.copy()
-        consultation_data['TOKEN_NO'] = pk
-        
-        if hasattr(request.user, 'staff_details') and request.user.staff_details.Role == 'Doctor':
-            consultation_data['DOC_ID'] = request.user.staff_details.STAFF_ID
-        
-        serializer = self.get_serializer(data=consultation_data)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        """Create consultation from appointment and auto-update status"""
+        try:
+            appointment = AppointmentDetails.objects.get(TOKEN_NO=pk)
+            consultation_data = request.data.copy()
+            consultation_data['TOKEN_NO'] = pk
+            
+            if hasattr(request.user, 'staff_details') and request.user.staff_details.Role == 'Doctor':
+                consultation_data['DOC_ID'] = request.user.staff_details.STAFF_ID
+            
+            serializer = self.get_serializer(data=consultation_data)
+            if serializer.is_valid():
+                consultation = serializer.save()
+                
+                # Update appointment status to 'Completed'
+                appointment.Status = 'Completed'
+                appointment.save()
+                
+                return Response({
+                    'message': 'Consultation created and appointment marked as completed',
+                    'consultation': serializer.data
+                }, status=status.HTTP_201_CREATED)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            
+        except AppointmentDetails.DoesNotExist:
+            return Response({'error': 'Appointment not found'}, status=status.HTTP_404_NOT_FOUND)
 
     @action(detail=False, methods=['get'])
     def consultation_history(self, request):

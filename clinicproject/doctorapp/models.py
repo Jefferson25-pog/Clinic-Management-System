@@ -112,3 +112,25 @@ class Prescription(models.Model):
     
     class Meta:
         db_table = 'PRESCRIPTION'
+
+# ADD THIS MISSING MODEL
+class LabTestRequestDetails(models.Model):
+    STATUS_CHOICES = [
+        ('Requested', 'Requested'),
+        ('In Progress', 'In Progress'),
+        ('Completed', 'Completed'),
+        ('Cancelled', 'Cancelled'),
+    ]
+    
+    LAB_REQUEST_ID = models.AutoField(primary_key=True)
+    CONSULT_ID = models.ForeignKey('ConsultationDetails', on_delete=models.CASCADE, related_name='doctor_lab_requests')
+    LAB_TEST_ID = models.ForeignKey('labtechapp.LabTests', on_delete=models.CASCADE, related_name='doctor_test_requests')
+    Requested_Date = models.DateTimeField(auto_now_add=True)
+    Status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Requested')
+    Notes = models.TextField(blank=True)
+    
+    def __str__(self):
+        return f"Lab Request {self.LAB_REQUEST_ID} - {self.LAB_TEST_ID.Lab_Test_Name}"
+    
+    class Meta:
+        db_table = 'DOCTOR_LAB_REQUESTS'
