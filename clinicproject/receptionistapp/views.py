@@ -78,64 +78,34 @@ class BillDetailsViewSet(viewsets.ModelViewSet):
     serializer_class = BillDetailsSerializer
     permission_classes = [IsAuthenticated, IsReceptionistUser]
 
-    @action(detail=True, methods=['post'])
-    def calculate_bill(self, request, pk=None):
-        """Auto-calculate all costs from related modules"""
-        bill = self.get_object()
-        bill.calculate_costs()
-        serializer = self.get_serializer(bill)
-        return Response(serializer.data)
-
-    @action(detail=True, methods=['post'])
-    def update_payment_status(self, request, pk=None):
-        """Update payment status and mode"""
-        bill = self.get_object()
-        new_status = request.data.get('status')
-        payment_mode = request.data.get('payment_mode')
-        
-        valid_statuses = ['Pending', 'Paid', 'Partial', 'Insurance Pending', 'Rejected']
-        valid_modes = ['Cash', 'Card', 'Online', 'Insurance', 'Mixed', None]
-        
-        if new_status in valid_statuses:
-            bill.Pay_Status = new_status
-            if payment_mode in valid_modes:
-                bill.Payment_Mode = payment_mode
-            bill.save()
-            return Response({'status': 'payment status updated'})
-        return Response({'error': 'invalid status'}, status=status.HTTP_400_BAD_REQUEST)
-
-    @action(detail=False, methods=['get'])
-    def pending_bills(self, request):
-        """Get all pending bills"""
-        pending_bills = BillDetails.objects.filter(Pay_Status='Pending')
-        serializer = self.get_serializer(pending_bills, many=True)
-        return Response(serializer.data)
-
-    @action(detail=False, methods=['post'])
-    def generate_bill(self, request):
-        """Generate a new bill for a consultation (auto-calculate costs)"""
+    def create(self, request, *args, **kwargs):
+        """Create a bill - only CONSULT_ID is needed, costs are auto-calculated"""
         consult_id = request.data.get('CONSULT_ID')
+        
+        if not consult_id:
+            return Response(
+                {'error': 'CONSULT_ID is required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
         
         try:
             from doctorapp.models import ConsultationDetails
-            consultation = ConsultationDetails.objects.get(CONSULT_ID=consult_id)
+            consultation = ConsultationDetails.objects.get(id=consult_id)
             
             # Check if bill already exists
-            existing_bill = BillDetails.objects.filter(CONSULT_ID=consultation).first()
-            if existing_bill:
+            if BillDetails.objects.filter(CONSULT_ID=consultation).exists():
                 return Response(
                     {'error': 'Bill already exists for this consultation'}, 
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # Create new bill with auto-calculated costs
+            # Create bill - costs will be auto-calculated in save()
             bill = BillDetails.objects.create(CONSULT_ID=consultation)
-            bill.calculate_costs()  # Auto-calculate all costs
             
             # Log the action
             ReceptionistLog.objects.create(
                 Action="Bill Generated",
-                Details=f"Generated bill {bill.BILL_ID} for consultation {consult_id}"
+                Details=f"Generated bill {bill.BILL_ID} for consultation {consult_id} - Total: ${bill.Total_Amount}"
             )
             
             serializer = self.get_serializer(bill)
@@ -146,3 +116,32 @@ class BillDetailsViewSet(viewsets.ModelViewSet):
                 {'error': 'Consultation not found'}, 
                 status=status.HTTP_404_NOT_FOUND
             )
+
+    @action(detail=True, methods=['post'])
+    def recalculate(self, request, pk=None):
+        """Manually recalculate costs (useful if medicines/lab tests were added later)"""
+        bill = self.get_object()
+        bill.calculate_costs()
+        bill.save()
+        serializer = self.get_serializer(bill)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def available_consultations(self, request):
+        """Get consultations that don't have bills yet"""
+        from doctorapp.models import ConsultationDetails
+        billed_consultations = BillDetails.objects.values_list('CONSULT_ID', flat=True)
+        available_consultations = ConsultationDetails.objects.exclude(
+            id__in=billed_consultations
+        ).select_related('TOKEN_NO__PAT_ID', 'DOC_ID')
+        
+        options = []
+        for consult in available_consultations:
+            options.append({
+                'CONSULT_ID': consult.id,
+                'patient_name': consult.TOKEN_NO.PAT_ID.Patient_Name,
+                'doctor_name': consult.DOC_ID.Name,
+                'consultation_date': consult.Created_Date
+            })
+        
+        return Response(options)

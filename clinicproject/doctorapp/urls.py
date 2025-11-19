@@ -4,7 +4,6 @@ from . import views
 
 router = DefaultRouter()
 # Remove doctors route since doctors are now in adminapp
-router.register(r'patients', views.PatientDetailsViewSet)
 router.register(r'appointments', views.AppointmentDetailsViewSet)
 router.register(r'consultations', views.ConsultationDetailsViewSet)
 router.register(r'prescriptions', views.PrescriptionViewSet)

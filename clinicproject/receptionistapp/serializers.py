@@ -5,19 +5,16 @@ import re
 from datetime import date
 
 class PatientDetailsSerializer(serializers.ModelSerializer):
-    age = serializers.SerializerMethodField()
+    age = serializers.ReadOnlyField()  # Use the model property
     
     class Meta:
         model = PatientDetails
         fields = '__all__'
         read_only_fields = ['age']
     
-    def get_age(self, obj):
-        if obj.DOB:
-            return (date.today() - obj.DOB).days // 365
-        return None
-    
     def validate_Patient_Name(self, value):
+        if not re.match(r'^[A-Za-z\s\.\-]+$', value):
+            raise serializers.ValidationError("Patient name can only contain letters, spaces, dots and hyphens")
         if len(value.strip()) < 2:
             raise serializers.ValidationError("Patient name must be at least 2 characters long")
         return value.strip()
@@ -33,18 +30,21 @@ class PatientDetailsSerializer(serializers.ModelSerializer):
         return value
     
     def validate_Phone_Number(self, value):
-        if not re.match(r'^\+?1?\d{9,15}$', value):
-            raise serializers.ValidationError("Enter a valid phone number")
+        if not re.match(r'^\d{10}$', value):
+            raise serializers.ValidationError("Phone number must be exactly 10 digits (no symbols or spaces)")
         return value
     
     def validate_Email(self, value):
-        if value and not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', value):
-            raise serializers.ValidationError("Enter a valid email address")
+        if value:
+            if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', value):
+                raise serializers.ValidationError("Enter a valid email address")
+            if not value.endswith(('.com', '.in', '.org', '.net')):
+                raise serializers.ValidationError("Email must have a valid domain (e.g., @gmail.com, @yahoo.in)")
         return value
 
 class AppointmentDetailsSerializer(serializers.ModelSerializer):
     patient_name = serializers.CharField(source='PAT_ID.Patient_Name', read_only=True)
-    doctor_name = serializers.CharField(source='DOC_ID.Name', read_only=True)  # FIXED: DOC_ID directly has Name
+    doctor_name = serializers.CharField(source='DOC_ID.Name', read_only=True)
     
     class Meta:
         model = AppointmentDetails
@@ -52,7 +52,7 @@ class AppointmentDetailsSerializer(serializers.ModelSerializer):
         read_only_fields = ['patient_name', 'doctor_name']
     
     def validate_Date(self, value):
-        if value < timezone.now():
+        if value < date.today():  # Use date instead of timezone for date field
             raise serializers.ValidationError("Appointment date cannot be in the past")
         return value
     
@@ -87,25 +87,28 @@ class ReceptionistLogSerializer(serializers.ModelSerializer):
         if len(value.strip()) < 5:
             raise serializers.ValidationError("Action description must be at least 5 characters long")
         return value.strip()
-    
+
 class BillDetailsSerializer(serializers.ModelSerializer):
     patient_name = serializers.CharField(source='CONSULT_ID.TOKEN_NO.PAT_ID.Patient_Name', read_only=True)
     doctor_name = serializers.CharField(source='CONSULT_ID.DOC_ID.Name', read_only=True)
     consultation_date = serializers.DateTimeField(source='CONSULT_ID.Consultation_Time', read_only=True)
     
-    # Add calculated cost fields as read-only
-    consultation_cost = serializers.DecimalField(source='Consultation_Cost', max_digits=10, decimal_places=2, read_only=True)
-    medicine_cost = serializers.DecimalField(source='Medicine_Cost', max_digits=10, decimal_places=2, read_only=True)
-    labtest_cost = serializers.DecimalField(source='LabTest_Cost', max_digits=10, decimal_places=2, read_only=True)
+    # These are now completely read-only from the model
+    Consultation_Cost = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    Medicine_Cost = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    LabTest_Cost = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    Total_Amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     
     class Meta:
         model = BillDetails
         fields = [
-            'BILL_ID', 'CONSULT_ID', 'Total_Amount', 'Pay_Status', 'Payment_Mode', 
-            'Created_Date', 'patient_name', 'doctor_name', 'consultation_date',
-            'consultation_cost', 'medicine_cost', 'labtest_cost'  # These are now read-only
+            'BILL_ID', 'CONSULT_ID', 
+            'Consultation_Cost', 'Medicine_Cost', 'LabTest_Cost', 'Total_Amount',
+            'Pay_Status', 'Payment_Mode', 'Created_Date',
+            'patient_name', 'doctor_name', 'consultation_date'
         ]
         read_only_fields = [
+            'BILL_ID', 'Consultation_Cost', 'Medicine_Cost', 'LabTest_Cost', 
             'Total_Amount', 'Created_Date', 'patient_name', 'doctor_name', 
-            'consultation_date', 'consultation_cost', 'medicine_cost', 'labtest_cost'
+            'consultation_date'
         ]

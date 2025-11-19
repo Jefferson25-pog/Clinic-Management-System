@@ -1,11 +1,11 @@
-# In labtechapp/views.py - Cleaned up
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import permissions
 from rest_framework.permissions import IsAuthenticated, BasePermission
-from .models import LabTests, LabTestRequestDetails, LabTestResults
-from .serializers import LabTestsSerializer, LabTestRequestDetailsSerializer, LabTestResultsSerializer
+from .models import LabTests, LabTestResults
+from .serializers import LabTestsSerializer, SimpleLabRequestSerializer, LabTestResultsSerializer
+from doctorapp.models import LabTestRequestDetails
 
 class IsLabTechUser(BasePermission):
     def has_permission(self, request, view):
@@ -24,9 +24,9 @@ class LabTestsViewSet(viewsets.ModelViewSet):
     serializer_class = LabTestsSerializer
     permission_classes = [IsAuthenticated]
 
-class LabTestRequestDetailsViewSet(viewsets.ModelViewSet):
+class LabTestRequestDetailsViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = LabTestRequestDetails.objects.all()
-    serializer_class = LabTestRequestDetailsSerializer
+    serializer_class = SimpleLabRequestSerializer
     permission_classes = [IsAuthenticated, IsLabTechUser]
 
     @action(detail=True, methods=['post'])
@@ -45,7 +45,6 @@ class LabTestRequestDetailsViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def pending_requests(self, request):
-        """Get all pending lab test requests"""
         pending_requests = LabTestRequestDetails.objects.filter(Status='Requested')
         serializer = self.get_serializer(pending_requests, many=True)
         return Response(serializer.data)
@@ -56,13 +55,10 @@ class LabTestResultsViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, IsLabTechUser]
 
     def create(self, request, *args, **kwargs):
-        """Override create to ensure one result per request"""
-        lab_request_id = request.data.get('LAB_REQUEST')  # Fixed field name
-        
-        if LabTestResults.objects.filter(LAB_REQUEST=lab_request_id).exists():  # Fixed field name
+        lab_request_id = request.data.get('LAB_REQUEST')
+        if LabTestResults.objects.filter(LAB_REQUEST=lab_request_id).exists():
             return Response(
                 {'error': 'Results already exist for this lab request'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
         return super().create(request, *args, **kwargs)
