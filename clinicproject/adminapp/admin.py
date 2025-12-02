@@ -1,7 +1,7 @@
 from django.contrib import admin
-from .models import StaffDetails, Departments
+from .models import StaffDetail, Department
 
-@admin.register(StaffDetails)
+@admin.register(StaffDetail)
 class StaffDetailsAdmin(admin.ModelAdmin):
     list_display = ['STAFF_ID', 'Name', 'Role', 'Department', 'Consultation_fees', 'Status', 'has_user_account']
     list_filter = ['Role', 'Department', 'Status']
@@ -48,7 +48,7 @@ class StaffDetailsAdmin(admin.ModelAdmin):
         self.message_user(request, f"User accounts created for {queryset.count()} staff members")
     create_user_accounts.short_description = "Create user accounts for selected staff"
 
-@admin.register(Departments)
+@admin.register(Department)
 class DepartmentsAdmin(admin.ModelAdmin):
     list_display = ['DEPT_ID', 'Department_Name']
     search_fields = ['Department_Name']

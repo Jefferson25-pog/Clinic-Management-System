@@ -1,11 +1,11 @@
 from rest_framework import serializers
-from .models import LabTests, LabTestResults
-from doctorapp.models import LabTestRequestDetails
+from .models import LabTest, LabTestResult
+from doctorapp.models import LabTestRequestDetail
 import re
 
 class LabTestsSerializer(serializers.ModelSerializer):
     class Meta:
-        model = LabTests
+        model = LabTest
         fields = ['LAB_TEST_ID', 'Lab_Test_Name', 'Lab_Test_Cost', 'Description']
     
     def validate_Lab_Test_Name(self, value):
@@ -33,7 +33,7 @@ class SimpleLabRequestSerializer(serializers.ModelSerializer):
     test_name = serializers.CharField(source='LAB_TEST_ID.Lab_Test_Name', read_only=True)
     
     class Meta:
-        model = LabTestRequestDetails
+        model = LabTestRequestDetail
         fields = ['LAB_REQUEST_ID', 'CONSULT_ID', 'LAB_TEST_ID', 'Requested_Date', 'Status', 'Notes', 'patient_name', 'doctor_name', 'test_name']
 
 class LabTestResultsSerializer(serializers.ModelSerializer):
@@ -41,7 +41,7 @@ class LabTestResultsSerializer(serializers.ModelSerializer):
     test_name = serializers.CharField(source='LAB_REQUEST.LAB_TEST_ID.Lab_Test_Name', read_only=True)
     
     class Meta:
-        model = LabTestResults
+        model = LabTestResult
         fields = [
             'RESULT_ID', 'LAB_REQUEST', 'Findings', 'Normal_Range',
             'Remarks', 'Result_Date', 'patient_name', 'test_name'

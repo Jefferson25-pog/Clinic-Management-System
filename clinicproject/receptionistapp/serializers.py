@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import PatientDetails, AppointmentDetails, ReceptionistLog, BillDetails
+from .models import PatientDetail, AppointmentDetail, ReceptionistLog, BillDetail
 from django.utils import timezone
 import re
 from datetime import date
@@ -8,7 +8,7 @@ class PatientDetailsSerializer(serializers.ModelSerializer):
     age = serializers.ReadOnlyField()  # Use the model property
     
     class Meta:
-        model = PatientDetails
+        model = PatientDetail
         fields = '__all__'
         read_only_fields = ['age']
     
@@ -45,11 +45,12 @@ class PatientDetailsSerializer(serializers.ModelSerializer):
 class AppointmentDetailsSerializer(serializers.ModelSerializer):
     patient_name = serializers.CharField(source='PAT_ID.Patient_Name', read_only=True)
     doctor_name = serializers.CharField(source='DOC_ID.Name', read_only=True)
+    priority_display = serializers.CharField(source='get_Priority_display', read_only=True)
     
     class Meta:
-        model = AppointmentDetails
+        model = AppointmentDetail
         fields = '__all__'
-        read_only_fields = ['patient_name', 'doctor_name']
+        read_only_fields = ['patient_name', 'doctor_name', 'priority_display']
     
     def validate_Date(self, value):
         if value < date.today():  # Use date instead of timezone for date field
@@ -64,7 +65,7 @@ class AppointmentDetailsSerializer(serializers.ModelSerializer):
             )
         
         # Check for duplicate appointments (same patient, same doctor, same time)
-        existing_appointment = AppointmentDetails.objects.filter(
+        existing_appointment = AppointmentDetail.objects.filter(
             PAT_ID=data['PAT_ID'],
             DOC_ID=data['DOC_ID'],
             Date=data['Date'],
@@ -100,7 +101,7 @@ class BillDetailsSerializer(serializers.ModelSerializer):
     Total_Amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     
     class Meta:
-        model = BillDetails
+        model = BillDetail
         fields = [
             'BILL_ID', 'CONSULT_ID', 
             'Consultation_Cost', 'Medicine_Cost', 'LabTest_Cost', 'Total_Amount',

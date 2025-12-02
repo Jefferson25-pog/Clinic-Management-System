@@ -1,13 +1,13 @@
 from django.contrib import admin
-from .models import PatientDetails, AppointmentDetails, ReceptionistLog, BillDetails
+from .models import PatientDetail, AppointmentDetail, ReceptionistLog, BillDetail
 
-@admin.register(PatientDetails)
+@admin.register(PatientDetail)
 class PatientDetailsAdmin(admin.ModelAdmin):
     list_display = ['PAT_ID', 'Patient_Name', 'DOB', 'Phone_Number', 'Email']
     search_fields = ['Patient_Name', 'PAT_ID', 'Phone_Number']
     list_filter = ['DOB']
 
-@admin.register(AppointmentDetails)
+@admin.register(AppointmentDetail)
 class AppointmentDetailsAdmin(admin.ModelAdmin):
     list_display = ['TOKEN_NO', 'patient_name', 'doctor_name', 'Date', 'Status']
     list_filter = ['Status', 'Date']
@@ -30,7 +30,7 @@ class ReceptionistLogAdmin(admin.ModelAdmin):
     list_filter = ['Timestamp']
     search_fields = ['Action', 'Details']
 
-@admin.register(BillDetails)
+@admin.register(BillDetail)
 class BillDetailsAdmin(admin.ModelAdmin):
     list_display = [
         'BILL_ID', 'patient_name', 'consultation_cost', 'medicine_cost', 

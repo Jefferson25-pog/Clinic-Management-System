@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError
 from datetime import date
 import re
 
-class PatientDetails(models.Model):
+class PatientDetail(models.Model):
     PAT_ID = models.AutoField(primary_key=True)
     Patient_Name = models.CharField(
         max_length=100,
@@ -68,7 +68,7 @@ class PatientDetails(models.Model):
     class Meta:
         db_table = 'PATIENT_DETAILS'
 
-class AppointmentDetails(models.Model):
+class AppointmentDetail(models.Model):
     STATUS_CHOICES = [
         ('Scheduled', 'Scheduled'),
         ('Completed', 'Completed'),
@@ -76,10 +76,19 @@ class AppointmentDetails(models.Model):
     ]
     
     TOKEN_NO = models.AutoField(primary_key=True)
-    PAT_ID = models.ForeignKey('PatientDetails', on_delete=models.CASCADE)
-    DOC_ID = models.ForeignKey('adminapp.StaffDetails', on_delete=models.CASCADE, limit_choices_to={'Role': 'Doctor'})
+    PAT_ID = models.ForeignKey('PatientDetail', on_delete=models.CASCADE)
+    DOC_ID = models.ForeignKey('adminapp.StaffDetail', on_delete=models.CASCADE, limit_choices_to={'Role': 'Doctor'})
     Status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Scheduled')
     Date = models.DateField()
+    Priority = models.CharField(
+        max_length=20, 
+        choices=[
+            ('normal', 'Normal'),
+            ('urgent', 'Urgent'),
+            ('critical', 'Critical')
+        ], 
+        default='normal'
+    )
     
     def __str__(self):
         return f"Token {self.TOKEN_NO} - {self.PAT_ID.Patient_Name} with Dr. {self.DOC_ID.Name}"
@@ -91,6 +100,7 @@ class AppointmentDetails(models.Model):
     
     class Meta:
         db_table = 'APPOINTMENT_DETAILS'
+        ordering = ['-Priority', 'Date']
 
 class ReceptionistLog(models.Model):
     LOG_ID = models.AutoField(primary_key=True)
@@ -102,9 +112,9 @@ class ReceptionistLog(models.Model):
         return f"Log {self.LOG_ID} - {self.Action} at {self.Timestamp.strftime('%Y-%m-%d %H:%M')}"
     
     class Meta:
-        db_table = 'RECEPTIONIST_LOG'
+        db_table = 'RECEPTIONIST_LOGS'
 
-class BillDetails(models.Model):
+class BillDetail(models.Model):
     PAYMENT_STATUS = [
         ('Pending', 'Pending'),
         ('Paid', 'Paid'),
@@ -122,7 +132,7 @@ class BillDetails(models.Model):
     ]
     
     BILL_ID = models.AutoField(primary_key=True)
-    CONSULT_ID = models.ForeignKey('doctorapp.ConsultationDetails', on_delete=models.CASCADE)
+    CONSULT_ID = models.ForeignKey('doctorapp.ConsultationDetail', on_delete=models.CASCADE)
     
     # Auto-calculated fields
     Consultation_Cost = models.DecimalField(max_digits=10, decimal_places=2, editable=False)
@@ -138,19 +148,19 @@ class BillDetails(models.Model):
         return f"Bill {self.BILL_ID} - {self.CONSULT_ID.TOKEN_NO.PAT_ID.Patient_Name} - ${self.Total_Amount}"
     
     def calculate_costs(self):
-        from pharmacistapp.models import DispensingMedicines
-        from labtechapp.models import LabTestRequestDetails
+        from pharmacistapp.models import DispensingMedicine
+        from doctorapp.models import LabTestRequestDetail
         
         # Auto-calculate consultation cost from doctor's fees
         if hasattr(self.CONSULT_ID.DOC_ID, 'Consultation_fees'):
             self.Consultation_Cost = self.CONSULT_ID.DOC_ID.Consultation_fees
         
         # Auto-calculate medicine costs
-        medicine_dispenses = DispensingMedicines.objects.filter(CONSULT_ID=self.CONSULT_ID)
+        medicine_dispenses = DispensingMedicine.objects.filter(CONSULT_ID=self.CONSULT_ID)
         self.Medicine_Cost = sum(dispense.Qty * dispense.Price for dispense in medicine_dispenses)
         
         # Auto-calculate lab test costs
-        lab_requests = LabTestRequestDetails.objects.filter(CONSULT_ID=self.CONSULT_ID)
+        lab_requests = LabTestRequestDetail.objects.filter(CONSULT_ID=self.CONSULT_ID)
         self.LabTest_Cost = sum(request.LAB_TEST_ID.Lab_Test_Cost for request in lab_requests)
         
         self.Total_Amount = self.Consultation_Cost + self.Medicine_Cost + self.LabTest_Cost

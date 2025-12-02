@@ -1,7 +1,7 @@
 from django.contrib import admin
-from .models import ConsultationDetails, Prescription, LabTestRequestDetails
+from .models import ConsultationDetail, Prescription, LabTestRequestDetail
 
-@admin.register(ConsultationDetails)
+@admin.register(ConsultationDetail)
 class ConsultationDetailsAdmin(admin.ModelAdmin):
     list_display = ['CONSULT_ID', 'patient_name', 'doctor_name', 'Consultation_Time']
     list_filter = ['Consultation_Time', 'DOC_ID']
@@ -30,7 +30,7 @@ class PrescriptionAdmin(admin.ModelAdmin):
         return obj.MED_ID.Medicine_Name
     medicine_name.short_description = 'Medicine'
 
-@admin.register(LabTestRequestDetails)
+@admin.register(LabTestRequestDetail)
 class LabTestRequestDetailsAdmin(admin.ModelAdmin):
     list_display = ['LAB_REQUEST_ID', 'patient_name', 'doctor_name', 'test_name', 'Status', 'Requested_Date']
     list_filter = ['Status', 'Requested_Date']

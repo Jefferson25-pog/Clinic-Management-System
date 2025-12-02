@@ -1,19 +1,31 @@
 from rest_framework import serializers
-from .models import StaffDetails, Departments
+from .models import StaffDetail, Department
 import re
+
+class DepartmentsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Department
+        fields = '__all__'
+    
+    def validate_Department_Name(self, value):
+        if len(value.strip()) < 2:
+            raise serializers.ValidationError("Department name must be at least 2 characters long")
+        if not re.match(r'^[A-Za-z\s&]+$', value):
+            raise serializers.ValidationError("Department name can only contain letters, spaces and ampersand")
+        return value.strip()
 
 class StaffDetailsSerializer(serializers.ModelSerializer):
     department_name = serializers.CharField(source='Department.Department_Name', read_only=True)
     
     class Meta:
-        model = StaffDetails
+        model = StaffDetail
         fields = '__all__'
     
     def validate_Name(self, value):
         if not re.match(r'^[A-Za-z\s\.\-]+$', value):
             raise serializers.ValidationError("Name can only contain letters, spaces, dots and hyphens")
-        if len(value.strip()) < 2:
-            raise serializers.ValidationError("Name must be at least 2 characters long")
+        if len(value.strip()) < 3:
+            raise serializers.ValidationError("Name must be at least 3 characters long")
         return value.strip()
     
     def validate_Email(self, value):
@@ -29,27 +41,18 @@ class StaffDetailsSerializer(serializers.ModelSerializer):
         return value
     
     def validate(self, data):
-        if data['Age'] < 18:
-            raise serializers.ValidationError({"Age": "Staff must be at least 18 years old"})
-        
-        # Doctor-specific validations
-        if data['Role'] == 'Doctor':
-            if data['Age'] < 25:
-                raise serializers.ValidationError({"Age": "Doctors must be at least 25 years old"})
-            if not data.get('Department'):
-                raise serializers.ValidationError({"Department": "Doctors must be assigned to a department"})
-            if data.get('Consultation_fees', 0) <= 0:
-                raise serializers.ValidationError({"Consultation_fees": "Doctors must have consultation fees greater than 0"})
+        age = data.get('Age')
+        if age is not None:
+            if age < 18:
+                raise serializers.ValidationError({"Age": "Staff must be at least 18 years old"})
+            
+            # Doctor-specific validations
+            if data.get('Role') == 'Doctor':
+                if age < 25:
+                    raise serializers.ValidationError({"Age": "Doctors must be at least 25 years old"})
+                if not data.get('Department'):
+                    raise serializers.ValidationError({"Department": "Doctors must be assigned to a department"})
+                consultation_fees = data.get('Consultation_fees', 0)
+                if consultation_fees is not None and consultation_fees <= 0:
+                    raise serializers.ValidationError({"Consultation_fees": "Doctors must have consultation fees greater than 0"})
         return data
-
-class DepartmentsSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Departments
-        fields = '__all__'
-    
-    def validate_Department_Name(self, value):
-        if len(value.strip()) < 2:
-            raise serializers.ValidationError("Department name must be at least 2 characters long")
-        if not re.match(r'^[A-Za-z\s&]+$', value):
-            raise serializers.ValidationError("Department name can only contain letters, spaces and ampersand")
-        return value.strip()

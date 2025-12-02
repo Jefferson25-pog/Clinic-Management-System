@@ -1,11 +1,11 @@
 from rest_framework import serializers
-from .models import MedicineDetails, SupplierDetails, StockDetails, StockOrderingDetails, DispensingMedicines
+from .models import MedicineDetail, SupplierDetail, StockDetails, StockOrderingDetail, DispensingMedicine
 from datetime import date
 import re
 
 class MedicineDetailsSerializer(serializers.ModelSerializer):
     class Meta:
-        model = MedicineDetails
+        model = MedicineDetail
         fields = '__all__'
     
     def validate_Medicine_Name(self, value):
@@ -31,7 +31,7 @@ class MedicineDetailsSerializer(serializers.ModelSerializer):
 
 class SupplierDetailsSerializer(serializers.ModelSerializer):
     class Meta:
-        model = SupplierDetails
+        model = SupplierDetail
         fields = '__all__'
     
     def validate_Supplier_Name(self, value):
@@ -48,25 +48,19 @@ class SupplierDetailsSerializer(serializers.ModelSerializer):
 
 class StockDetailsSerializer(serializers.ModelSerializer):
     medicine_name = serializers.CharField(source='MED_ID.Medicine_Name', read_only=True)
-    supplier_name = serializers.CharField(source='SUPPLIER_ID.Supplier_Name', read_only=True)
     days_until_expiry = serializers.SerializerMethodField()
     
     class Meta:
         model = StockDetails
         fields = '__all__'
-        read_only_fields = ['medicine_name', 'supplier_name', 'days_until_expiry']
+        read_only_fields = ['medicine_name', 'days_until_expiry']
     
     def get_days_until_expiry(self, obj):
-        if obj.Expiry_Date:
-            return (obj.Expiry_Date - date.today()).days
+        if obj.Earliest_Expiry:
+            return (obj.Earliest_Expiry - date.today()).days
         return None
     
-    def validate_Expiry_Date(self, value):
-        if value <= date.today():
-            raise serializers.ValidationError("Expiry date must be in the future")
-        return value
-    
-    def validate_Stock_Availability(self, value):
+    def validate_Total_Stock_Availability(self, value):
         if value < 0:
             raise serializers.ValidationError("Stock availability cannot be negative")
         if value > 100000:
@@ -79,7 +73,7 @@ class StockOrderingDetailsSerializer(serializers.ModelSerializer):
     total_cost = serializers.SerializerMethodField()
     
     class Meta:
-        model = StockOrderingDetails
+        model = StockOrderingDetail
         fields = '__all__'
         read_only_fields = ['medicine_name', 'supplier_name', 'total_cost']
     
@@ -112,7 +106,7 @@ class DispensingMedicinesSerializer(serializers.ModelSerializer):
     total_price = serializers.SerializerMethodField()
     
     class Meta:
-        model = DispensingMedicines
+        model = DispensingMedicine
         fields = '__all__'
         read_only_fields = ['medicine_name', 'patient_name', 'doctor_name', 'total_price', 'Dispense_Date']
     
