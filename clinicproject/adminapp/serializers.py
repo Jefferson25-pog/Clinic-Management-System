@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import StaffDetail, Department
+from django.contrib.auth.models import Group
 import re
 
 class DepartmentsSerializer(serializers.ModelSerializer):
@@ -14,12 +15,20 @@ class DepartmentsSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Department name can only contain letters, spaces and ampersand")
         return value.strip()
 
+class GroupSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Group
+        fields = ['id', 'name']
+
 class StaffDetailsSerializer(serializers.ModelSerializer):
     department_name = serializers.CharField(source='Department.Department_Name', read_only=True)
+    groups = GroupSerializer(source='user.groups', many=True, read_only=True)
+    username = serializers.CharField(source='user.username', read_only=True)
     
     class Meta:
         model = StaffDetail
         fields = '__all__'
+        read_only_fields = ['user', 'has_user_account']
     
     def validate_Name(self, value):
         if not re.match(r'^[A-Za-z\s\.\-]+$', value):
@@ -46,7 +55,6 @@ class StaffDetailsSerializer(serializers.ModelSerializer):
             if age < 18:
                 raise serializers.ValidationError({"Age": "Staff must be at least 18 years old"})
             
-            # Doctor-specific validations
             if data.get('Role') == 'Doctor':
                 if age < 25:
                     raise serializers.ValidationError({"Age": "Doctors must be at least 25 years old"})

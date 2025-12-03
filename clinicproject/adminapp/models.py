@@ -4,6 +4,11 @@ from django.core.validators import MinValueValidator, MaxValueValidator, RegexVa
 from django.core.exceptions import ValidationError
 import re
 from datetime import date
+from django.contrib.auth.models import Group
+from django.db import transaction
+import logging
+
+logger = logging.getLogger(__name__)
 
 class Department(models.Model):
     DEPT_ID = models.AutoField(primary_key=True, verbose_name="Department ID")
@@ -87,7 +92,6 @@ class StaffDetail(models.Model):
     )
     Role = models.CharField(max_length=20, choices=ROLE_CHOICES, verbose_name="Role")
     
-    # Doctor-specific fields
     Consultation_fees = models.DecimalField(
         max_digits=10, 
         decimal_places=2,
@@ -127,28 +131,88 @@ class StaffDetail(models.Model):
         return f"{self.Name} ({self.Role})"
     
     def create_user_account(self):
-        """Create a Django User account for this staff member"""
         if not self.user:
-            username = f"{self.Name.lower().replace(' ', '.')}{self.STAFF_ID}"
-            user = User.objects.create_user(
-                username=username,
-                email=self.Email,
-                password='temp123'
-            )
-            self.user = user
-            self.save()
+            with transaction.atomic():
+                username = f"{self.Name.lower().replace(' ', '.')}.{self.STAFF_ID}"
+                
+                if User.objects.filter(username=username).exists():
+                    username = f"{username}.{self.STAFF_ID}"
+                
+                user = User.objects.create_user(
+                    username=username,
+                    email=self.Email,
+                    password='temp123'
+                )
+                
+                try:
+                    group = Group.objects.get(name=self.Role)
+                except Group.DoesNotExist:
+                    group = Group.objects.create(name=self.Role)
+                
+                user.groups.add(group)
+                
+                if self.Role == 'Admin':
+                    user.is_staff = True
+                    user.save()
+                
+                self.user = user
+                self.save()
+                
+                from authentication.models import UserProfile
+                UserProfile.objects.create(user=user, staff_detail=self)
+                
+                self._log_account_creation(user)
+        
+        return self.user
+    
+    def _log_account_creation(self, user):
+        from authentication.models import SystemLog
+        SystemLog.objects.create(
+            level='INFO',
+            log_type='USER',
+            user=user,
+            action=f'User account created for {self.Name} ({self.Role})',
+            details={
+                'staff_id': self.STAFF_ID,
+                'role': self.Role,
+                'username': user.username
+            }
+        )
+    
+    @property
+    def has_user_account(self):
+        return self.user is not None
+    
+    def reset_password(self, new_password=None):
+        if self.user:
+            if new_password:
+                self.user.set_password(new_password)
+            else:
+                import secrets
+                import string
+                alphabet = string.ascii_letters + string.digits
+                new_password = ''.join(secrets.choice(alphabet) for _ in range(12))
+                self.user.set_password(new_password)
             
-            from django.contrib.auth.models import Group
-            group, created = Group.objects.get_or_create(name=self.Role)
-            user.groups.add(group)
+            self.user.save()
+            
+            from authentication.models import SystemLog
+            SystemLog.objects.create(
+                level='SECURITY',
+                log_type='SECURITY',
+                user=self.user,
+                action='Password reset',
+                details={'staff_id': self.STAFF_ID, 'auto_generated': new_password is None}
+            )
+            
+            return new_password if not new_password else None
+        return None
     
     def clean(self):
-        # Age validation
         if self.Age is not None:
             if self.Age < 18:
                 raise ValidationError({'Age': 'Staff must be at least 18 years old'})
             
-            # Doctor-specific validations
             if self.Role == 'Doctor':
                 if self.Age < 25:
                     raise ValidationError({'Age': 'Doctors must be at least 25 years old'})
@@ -157,7 +221,6 @@ class StaffDetail(models.Model):
                 if self.Consultation_fees is not None and self.Consultation_fees <= 0:
                     raise ValidationError({'Consultation_fees': 'Doctors must have consultation fees greater than 0'})
         
-        # Email domain validation
         if self.Email and not self.Email.endswith(('.com', '.in', '.org', '.net')):
             raise ValidationError({'Email': 'Email must have a valid domain (e.g., @gmail.com, @yahoo.in)'})
     
