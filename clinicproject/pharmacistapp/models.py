@@ -14,7 +14,7 @@ class MedicineDetail(models.Model):
             RegexValidator(
                 regex=r'^[A-Za-z0-9\s\-\(\)]+$',
                 message='Medicine name can only contain letters, numbers, spaces, hyphens and parentheses'
-            )
+            )   
         ]
     )
     Dosage = models.CharField(
