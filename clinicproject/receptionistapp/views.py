@@ -71,15 +71,101 @@ class AppointmentDetailsViewSet(viewsets.ModelViewSet):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+
 class ReceptionistLogViewSet(viewsets.ModelViewSet):
     queryset = ReceptionistLog.objects.all()
     serializer_class = ReceptionistLogSerializer
     permission_classes = [IsAuthenticated, IsReceptionistUser | IsAdminUser]
 
 class DoctorsViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = StaffDetail.objects.filter(Role='Doctor')
+    queryset = StaffDetail.objects.filter(Role='Doctor', Status='Available')  # 👈 Only show available doctors
     serializer_class = StaffDetailsSerializer
     permission_classes = [IsAuthenticated, IsReceptionistUser | IsAdminUser]
+    
+    @action(detail=False, methods=['get'])
+    def all_doctors(self, request):
+        """Get all doctors (including unavailable ones) - for admin view"""
+        if request.user.is_superuser or (hasattr(request.user, 'staff_detail') and request.user.staff_detail.Role == 'Admin'):
+            all_doctors = StaffDetail.objects.filter(Role='Doctor')
+            serializer = self.get_serializer(all_doctors, many=True)
+            return Response({
+                'count': all_doctors.count(),
+                'doctors': serializer.data,
+                'availability_summary': {
+                    'available': all_doctors.filter(Status='Available').count(),
+                    'busy': all_doctors.filter(Status='Busy').count(),
+                    'on_leave': all_doctors.filter(Status='On Leave').count()
+                }
+            })
+        return Response({'error': 'Admin access required'}, status=status.HTTP_403_FORBIDDEN)
+    
+    @action(detail=False, methods=['get'])
+    def available_by_department(self, request):
+        """Get available doctors grouped by department"""
+        available_doctors = StaffDetail.objects.filter(
+            Role='Doctor', 
+            Status='Available'
+        ).select_related('Department')
+        
+        # Group by department
+        departments = {}
+        for doctor in available_doctors:
+            dept_name = doctor.Department.Department_Name if doctor.Department else 'No Department'
+            if dept_name not in departments:
+                departments[dept_name] = []
+            
+            departments[dept_name].append({
+                'doctor_id': doctor.STAFF_ID,
+                'doctor_name': doctor.Name,
+                'consultation_fees': float(doctor.Consultation_fees),
+                'email': doctor.Email,
+                'phone': doctor.Phone_Number
+            })
+        
+        return Response({
+            'departments': departments,
+            'total_available': available_doctors.count()
+        })
+    
+    @action(detail=False, methods=['get'])
+    def check_doctor_availability(self, request):
+        """Check if a specific doctor is available"""
+        doctor_id = request.query_params.get('doctor_id')
+        appointment_date = request.query_params.get('date')
+        
+        if not doctor_id:
+            return Response({'error': 'doctor_id parameter is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            doctor = StaffDetail.objects.get(STAFF_ID=doctor_id, Role='Doctor')
+            
+            # Check if doctor has appointments on that date
+            appointments_on_date = 0
+            if appointment_date:
+                try:
+                    from datetime import datetime
+                    date_obj = datetime.strptime(appointment_date, '%Y-%m-%d').date()
+                    appointments_on_date = AppointmentDetail.objects.filter(
+                        DOC_ID=doctor,
+                        Date=date_obj,
+                        Status='Scheduled'
+                    ).count()
+                except ValueError:
+                    return Response({'error': 'Invalid date format. Use YYYY-MM-DD'}, status=status.HTTP_400_BAD_REQUEST)
+            
+            return Response({
+                'doctor_id': doctor.STAFF_ID,
+                'doctor_name': doctor.Name,
+                'status': doctor.Status,
+                'status_display': doctor.get_Status_display(),
+                'is_available': doctor.Status == 'Available',
+                'appointments_on_date': appointments_on_date if appointment_date else 'Date not specified',
+                'department': doctor.Department.Department_Name if doctor.Department else None,
+                'consultation_fees': float(doctor.Consultation_fees)
+            })
+            
+        except StaffDetail.DoesNotExist:
+            return Response({'error': 'Doctor not found'}, status=status.HTTP_404_NOT_FOUND)
 
 class BillDetailsViewSet(viewsets.ModelViewSet):
     queryset = BillDetail.objects.all()

@@ -24,11 +24,12 @@ class StaffDetailsSerializer(serializers.ModelSerializer):
     department_name = serializers.CharField(source='Department.Department_Name', read_only=True)
     groups = GroupSerializer(source='user.groups', many=True, read_only=True)
     username = serializers.CharField(source='user.username', read_only=True)
+    status_display = serializers.CharField(source='get_Status_display', read_only=True)  # 👈 Add this
     
     class Meta:
         model = StaffDetail
         fields = '__all__'
-        read_only_fields = ['user', 'has_user_account']
+        read_only_fields = ['user', 'has_user_account', 'status_display']
     
     def validate_Name(self, value):
         if not re.match(r'^[A-Za-z\s\.\-]+$', value):

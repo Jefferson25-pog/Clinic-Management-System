@@ -543,3 +543,100 @@ class LabResultsViewSet(viewsets.ReadOnlyModelViewSet):
                 'pending_requests': requests_data
             })
         return Response([])
+
+# In doctorapp/views.py, add these to the existing views
+
+class DoctorAvailabilityViewSet(viewsets.ViewSet):
+    """ViewSet for doctors to manage their availability"""
+    permission_classes = [IsAuthenticated, IsDoctorUser]
+    
+    @action(detail=False, methods=['get'])
+    def my_availability(self, request):
+        """Get current doctor's availability status"""
+        if hasattr(request.user, 'staff_detail'):
+            doctor = request.user.staff_detail
+            return Response({
+                'doctor_id': doctor.STAFF_ID,
+                'doctor_name': doctor.Name,
+                'current_status': doctor.Status,
+                'status_display': doctor.get_Status_display(),
+                'department': doctor.Department.Department_Name if doctor.Department else None,
+                'consultation_fees': doctor.Consultation_fees,
+                'can_change_status': True  # Doctors can always change their own status
+            })
+        return Response({'error': 'Doctor profile not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    @action(detail=False, methods=['post'])
+    def set_availability(self, request):
+        """Set doctor's availability status"""
+        if hasattr(request.user, 'staff_detail'):
+            doctor = request.user.staff_detail
+            new_status = request.data.get('status')
+            
+            valid_statuses = ['Available', 'Busy', 'On Leave']
+            if new_status not in valid_statuses:
+                return Response({
+                    'error': f'Invalid status. Must be one of: {", ".join(valid_statuses)}'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Update status
+            doctor.Status = new_status
+            doctor.save()
+            
+            # Log the status change
+            from authentication.models import SystemLog
+            SystemLog.objects.create(
+                level='INFO',
+                log_type='USER',
+                user=request.user,
+                action=f'Doctor availability changed to {new_status}',
+                details={
+                    'doctor_id': doctor.STAFF_ID,
+                    'doctor_name': doctor.Name,
+                    'old_status': request.data.get('old_status', 'Unknown'),
+                    'new_status': new_status
+                }
+            )
+            
+            return Response({
+                'success': True,
+                'message': f'Availability status updated to {new_status}',
+                'doctor_id': doctor.STAFF_ID,
+                'doctor_name': doctor.Name,
+                'status': doctor.Status,
+                'status_display': doctor.get_Status_display()
+            })
+        
+        return Response({'error': 'Doctor profile not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    @action(detail=False, methods=['post'])
+    def set_available(self, request):
+        """Convenience method to set status to Available"""
+        if hasattr(request.user, 'staff_detail'):
+            doctor = request.user.staff_detail
+            doctor.Status = 'Available'
+            doctor.save()
+            
+            return Response({
+                'success': True,
+                'message': 'Status set to Available',
+                'doctor_id': doctor.STAFF_ID,
+                'status': doctor.Status
+            })
+        return Response({'error': 'Doctor profile not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    @action(detail=False, methods=['post'])
+    def set_busy(self, request):
+        """Convenience method to set status to Busy"""
+        if hasattr(request.user, 'staff_detail'):
+            doctor = request.user.staff_detail
+            doctor.Status = 'Busy'
+            doctor.save()
+            
+            return Response({
+                'success': True,
+                'message': 'Status set to Busy',
+                'doctor_id': doctor.STAFF_ID,
+                'status': doctor.Status
+            })
+        return Response({'error': 'Doctor profile not found'}, status=status.HTTP_404_NOT_FOUND)
