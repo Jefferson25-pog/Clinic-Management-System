@@ -4,9 +4,12 @@ from django.contrib.auth.models import Group
 import re
 
 class DepartmentsSerializer(serializers.ModelSerializer):
+    doctor_count = serializers.SerializerMethodField()
+    
     class Meta:
         model = Department
-        fields = '__all__'
+        fields = ['DEPT_ID', 'Department_Name', 'created_at', 'doctor_count']
+        read_only_fields = ['DEPT_ID', 'created_at', 'doctor_count']
     
     def validate_Department_Name(self, value):
         if len(value.strip()) < 2:
@@ -14,6 +17,10 @@ class DepartmentsSerializer(serializers.ModelSerializer):
         if not re.match(r'^[A-Za-z\s&]+$', value):
             raise serializers.ValidationError("Department name can only contain letters, spaces and ampersand")
         return value.strip()
+    
+    def get_doctor_count(self, obj):
+        # Use the related_name 'staff_details'
+        return obj.staff_details.filter(Role='Doctor').count()
 
 class GroupSerializer(serializers.ModelSerializer):
     class Meta:
@@ -24,12 +31,13 @@ class StaffDetailsSerializer(serializers.ModelSerializer):
     department_name = serializers.CharField(source='Department.Department_Name', read_only=True)
     groups = GroupSerializer(source='user.groups', many=True, read_only=True)
     username = serializers.CharField(source='user.username', read_only=True)
-    status_display = serializers.CharField(source='get_Status_display', read_only=True)  # 👈 Add this
+    status_display = serializers.CharField(source='get_Status_display', read_only=True)
+    has_user_account = serializers.SerializerMethodField()
     
     class Meta:
         model = StaffDetail
         fields = '__all__'
-        read_only_fields = ['user', 'has_user_account', 'status_display']
+        read_only_fields = ['user', 'has_user_account', 'status_display', 'STAFF_ID', 'created_at']
     
     def validate_Name(self, value):
         if not re.match(r'^[A-Za-z\s\.\-]+$', value):
@@ -65,3 +73,6 @@ class StaffDetailsSerializer(serializers.ModelSerializer):
                 if consultation_fees is not None and consultation_fees <= 0:
                     raise serializers.ValidationError({"Consultation_fees": "Doctors must have consultation fees greater than 0"})
         return data
+    
+    def get_has_user_account(self, obj):
+        return hasattr(obj, 'user') and obj.user is not None

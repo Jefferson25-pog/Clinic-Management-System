@@ -6,11 +6,13 @@ from .models import ConsultationDetail, Prescription, LabTestRequestDetail
 from .serializers import ConsultationDetailsSerializer, PrescriptionSerializer, LabTestsSerializer, LabTestRequestDetailsSerializer
 from receptionistapp.models import AppointmentDetail
 from receptionistapp.serializers import AppointmentDetailsSerializer
+from pharmacistapp.models import StockDetails, MedicineDetail
+from pharmacistapp.serializers import MedicineDetailsSerializer
 from rest_framework import serializers
 from labtechapp.models import LabTest, LabTestResult
 from labtechapp.serializers import LabTestResultsSerializer
 from django.utils import timezone
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta,date
 
 class IsDoctorUser(BasePermission):
     def has_permission(self, request, view):
@@ -640,3 +642,41 @@ class DoctorAvailabilityViewSet(viewsets.ViewSet):
                 'status': doctor.Status
             })
         return Response({'error': 'Doctor profile not found'}, status=status.HTTP_404_NOT_FOUND)
+
+class AvailableMedicinesViewSet(viewsets.ReadOnlyModelViewSet):
+    permission_classes = [IsAuthenticated, IsDoctorUser | IsAdminUser]
+    serializer_class = MedicineDetailsSerializer
+
+    def get_queryset(self):
+        # Only medicines with available stock (>0 and not expired)
+        return MedicineDetail.objects.filter(
+            stockdetails__Total_Stock_Availability__gt=0,
+            stockdetails__Earliest_Expiry__gt=date.today()
+        ).distinct()
+
+    @action(detail=False, methods=['get'])
+    def with_stock(self, request):
+        """Enhanced list: medicine + stock summary"""
+        stocks = StockDetails.objects.select_related(
+            'MED_ID'
+        ).filter(
+            Total_Stock_Availability__gt=0,
+            Earliest_Expiry__gt=date.today()
+        ).order_by('MED_ID__Medicine_Name')
+
+        data = []
+        for stock in stocks:
+            med = stock.MED_ID
+            data.append({
+                'MED_ID': med.MED_ID,
+                'Medicine_Name': med.Medicine_Name,
+                'Dosage': med.Dosage,
+                'Price_per_Unit': float(med.Price_per_Unit),
+                'stock': {
+                    'available': stock.Total_Stock_Availability,
+                    'earliest_expiry': stock.Earliest_Expiry,
+                    'days_until_expiry': (stock.Earliest_Expiry - date.today()).days,
+                    'is_low_stock': stock.Total_Stock_Availability < stock.Minimum_Stock_Level
+                }
+            })
+        return Response(data)

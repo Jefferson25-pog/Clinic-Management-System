@@ -1,11 +1,14 @@
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, filters
 from rest_framework.permissions import IsAuthenticated, BasePermission
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from django.db.models import Count, Q
 from .models import StaffDetail, Department
 from .serializers import StaffDetailsSerializer, DepartmentsSerializer, GroupSerializer
 from django.contrib.auth.models import Group
 from authentication.models import SystemLog
+from django_filters.rest_framework import DjangoFilterBackend
+
 
 class IsAdminUser(BasePermission):
     def has_permission(self, request, view):
@@ -17,9 +20,17 @@ class IsAdminUser(BasePermission):
                  request.user.is_staff))
 
 class StaffDetailsViewSet(viewsets.ModelViewSet):
-    queryset = StaffDetail.objects.all()
+    queryset = StaffDetail.objects.all().select_related('Department')
     serializer_class = StaffDetailsSerializer
     permission_classes = [IsAuthenticated, IsAdminUser]
+
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    
+    # DEFINE FILTER FIELDS
+    filterset_fields = ['Role', 'Status', 'Department']
+    search_fields = ['Name', 'Email', 'STAFF_ID', 'Phone_Number']
+    ordering_fields = ['STAFF_ID', 'Name', 'Role', 'Status', 'created_at']
+    ordering = ['STAFF_ID']
     
     @action(detail=True, methods=['post'])
     def create_account(self, request, pk=None):
@@ -55,6 +66,11 @@ class DepartmentsViewSet(viewsets.ModelViewSet):
     queryset = Department.objects.all()
     serializer_class = DepartmentsSerializer
     permission_classes = [IsAuthenticated, IsAdminUser]
+    
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['Department_Name']
+    ordering_fields = ['DEPT_ID', 'Department_Name', 'created_at']
+    ordering = ['DEPT_ID']
 
 class GroupViewSet(viewsets.ModelViewSet):
     queryset = Group.objects.all()

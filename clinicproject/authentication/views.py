@@ -14,6 +14,7 @@ from .serializers import (
     GroupSerializer,
     PasswordChangeSerializer
 )
+from authentication.models import LoginHistory
 from .models import SystemLog, ActivityMonitor, UserProfile
 from adminapp.models import StaffDetail
 from adminapp.serializers import StaffDetailsSerializer
@@ -403,3 +404,9 @@ class ChangePasswordView(APIView):
             'success': False,
             'errors': serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
+    
+from rest_framework_simplejwt.views import TokenObtainPairView
+from .serializers import CustomTokenObtainPairSerializer
+
+class CustomTokenObtainPairView(TokenObtainPairView):
+    serializer_class = CustomTokenObtainPairSerializer

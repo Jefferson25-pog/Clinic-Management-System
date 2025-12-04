@@ -130,3 +130,25 @@ class PasswordChangeSerializer(serializers.Serializer):
             raise serializers.ValidationError("Password must be at least 8 characters long")
         
         return data
+    
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+
+class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+    def validate(self, attrs):
+        data = super().validate(attrs)
+
+        user = self.user
+        staff = getattr(user, "staff_detail", None)
+
+        # Define role
+        if user.is_superuser:
+            role = "Admin"
+        elif staff:
+            role = staff.Role
+        else:
+            role = None
+
+        data["role"] = role
+        data["is_superuser"] = user.is_superuser
+
+        return data

@@ -23,6 +23,7 @@ class Department(models.Model):
             )
         ]
     )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")  # Added field
     
     def __str__(self):
         return self.Department_Name
@@ -107,7 +108,8 @@ class StaffDetail(models.Model):
         on_delete=models.SET_NULL, 
         null=True, 
         blank=True,
-        verbose_name="Department"
+        verbose_name="Department",
+        related_name='staff_details'  # Added related_name
     )
     Status = models.CharField(
         max_length=20, 
@@ -115,6 +117,7 @@ class StaffDetail(models.Model):
         default='Available',
         verbose_name="Status"
     )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")  # Added field
     
     user = models.OneToOneField(
         User, 
