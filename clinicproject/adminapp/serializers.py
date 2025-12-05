@@ -1,7 +1,9 @@
+# adminapp/serializers.py - FINAL CORRECTED VERSION
 from rest_framework import serializers
 from .models import StaffDetail, Department
 from django.contrib.auth.models import Group
 import re
+from django.utils import timezone
 
 class DepartmentsSerializer(serializers.ModelSerializer):
     doctor_count = serializers.SerializerMethodField()
@@ -19,7 +21,6 @@ class DepartmentsSerializer(serializers.ModelSerializer):
         return value.strip()
     
     def get_doctor_count(self, obj):
-        # Use the related_name 'staff_details'
         return obj.staff_details.filter(Role='Doctor').count()
 
 class GroupSerializer(serializers.ModelSerializer):
@@ -33,11 +34,20 @@ class StaffDetailsSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source='user.username', read_only=True)
     status_display = serializers.CharField(source='get_Status_display', read_only=True)
     has_user_account = serializers.SerializerMethodField()
+    account_status = serializers.SerializerMethodField()
+    account_created = serializers.DateTimeField(source='account_created_at', read_only=True)
+    last_password_reset = serializers.DateTimeField(read_only=True)
+    is_account_active = serializers.BooleanField(source='account_active', read_only=True)
     
     class Meta:
         model = StaffDetail
         fields = '__all__'
-        read_only_fields = ['user', 'has_user_account', 'status_display', 'STAFF_ID', 'created_at']
+        read_only_fields = [
+            'user', 'has_user_account', 'status_display', 
+            'STAFF_ID', 'created_at', 'account_status',
+            'account_created', 'last_password_reset', 'is_account_active',
+            'account_created_at', 'account_deactivated_at'
+        ]
     
     def validate_Name(self, value):
         if not re.match(r'^[A-Za-z\s\.\-]+$', value):
@@ -75,4 +85,7 @@ class StaffDetailsSerializer(serializers.ModelSerializer):
         return data
     
     def get_has_user_account(self, obj):
-        return hasattr(obj, 'user') and obj.user is not None
+        return obj.has_user_account
+    
+    def get_account_status(self, obj):
+        return obj.account_status

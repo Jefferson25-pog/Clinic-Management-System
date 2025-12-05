@@ -1,3 +1,5 @@
+# authentication/views.py - COMPLETE FIXED VERSION
+from django.conf import settings
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -6,22 +8,27 @@ from django.contrib.auth.models import User, Group
 from django.contrib.auth import update_session_auth_hash
 from django.db import transaction
 from django.utils import timezone
+from django.db.models import Avg, Q
+from django.shortcuts import get_object_or_404
+import datetime
+import logging
+
 from .serializers import (
     AdminLoginSerializer, 
     StaffLoginSerializer, 
     UserSerializer,
     UserCreateSerializer,
     GroupSerializer,
-    PasswordChangeSerializer
+    PasswordChangeSerializer,
+    CustomTokenObtainPairSerializer
 )
-from authentication.models import LoginHistory
-from .models import SystemLog, ActivityMonitor, UserProfile
-from adminapp.models import StaffDetail
-from adminapp.serializers import StaffDetailsSerializer
-import datetime
-import logging
+from .models import LoginHistory, UserProfile, SystemLog, ActivityMonitor
+from rest_framework_simplejwt.views import TokenObtainPairView
 
 logger = logging.getLogger(__name__)
+
+class CustomTokenObtainPairView(TokenObtainPairView):
+    serializer_class = CustomTokenObtainPairSerializer
 
 class AdminLoginView(APIView):
     permission_classes = [AllowAny]
@@ -85,7 +92,6 @@ class StaffLoginView(APIView):
         serializer = StaffLoginSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             user = serializer.validated_data['user']
-            staff_detail = serializer.validated_data['staff_detail']
             user_serializer = UserSerializer(user)
             
             # Update last activity
@@ -103,9 +109,7 @@ class StaffLoginView(APIView):
                 success=True,
                 details={
                     'user_id': user.id,
-                    'staff_id': staff_detail.STAFF_ID,
-                    'staff_name': staff_detail.Name,
-                    'role': staff_detail.Role
+                    'username': user.username
                 }
             )
             
@@ -113,7 +117,6 @@ class StaffLoginView(APIView):
                 'success': True,
                 'message': 'Staff login successful',
                 'user': user_serializer.data,
-                'staff_detail': StaffDetailsSerializer(staff_detail).data,
                 'tokens': {
                     'refresh': serializer.validated_data['refresh'],
                     'access': serializer.validated_data['access']
@@ -146,19 +149,32 @@ class AuthCheckView(APIView):
             'user': user_serializer.data
         }
         
-        if hasattr(request.user, 'staff_detail') and request.user.staff_detail:
-            data['staff_detail'] = StaffDetailsSerializer(request.user.staff_detail).data
-        
         return Response(data)
 
 class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
     
     def post(self, request):
+        user = request.user
+        
+        # Find and mark logout in login history
+        try:
+            recent_login = LoginHistory.objects.filter(
+                user=user,
+                success=True,
+                logout_timestamp__isnull=True
+            ).order_by('-timestamp').first()
+            
+            if recent_login:
+                recent_login.mark_logout()
+        except Exception as e:
+            logger.error(f"Error marking logout: {str(e)}")
+        
+        # Log system log
         SystemLog.objects.create(
             level='INFO',
             log_type='AUTH',
-            user=request.user,
+            user=user,
             ip_address=request.META.get('REMOTE_ADDR'),
             action='User logout',
             details={'username': request.user.username}
@@ -181,9 +197,32 @@ class GroupListView(APIView):
         })
 
 class UserListView(generics.ListAPIView):
-    queryset = User.objects.all()
+    queryset = User.objects.all().order_by('-date_joined')
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAdminUser]
+    
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        
+        # Filter by search
+        search = self.request.query_params.get('search', None)
+        if search:
+            queryset = queryset.filter(
+                Q(username__icontains=search) |
+                Q(email__icontains=search) |
+                Q(first_name__icontains=search) |
+                Q(last_name__icontains=search)
+            )
+        
+        # Filter by role
+        role = self.request.query_params.get('role', None)
+        if role:
+            if role == 'Admin':
+                queryset = queryset.filter(is_staff=True, is_superuser=False)
+            elif role == 'Super Admin':
+                queryset = queryset.filter(is_superuser=True)
+        
+        return queryset
 
 class UserCreateView(APIView):
     permission_classes = [permissions.IsAdminUser]
@@ -194,6 +233,31 @@ class UserCreateView(APIView):
             with transaction.atomic():
                 user = serializer.save()
                 
+                # The signal should have already created a UserProfile
+                if not hasattr(user, 'profile'):
+                    try:
+                        UserProfile.objects.get_or_create(user=user)
+                    except Exception as e:
+                        logger.error(f"Error creating profile: {e}")
+                
+                # Add user to group based on role
+                role = request.data.get('role', 'User')
+                if role:
+                    try:
+                        group = Group.objects.get(name=role)
+                        user.groups.add(group)
+                        
+                        # If role is Admin, set staff flag
+                        if role in ['Admin', 'Super Admin']:
+                            user.is_staff = True
+                            if role == 'Super Admin':
+                                user.is_superuser = True
+                            user.save()
+                    except Group.DoesNotExist:
+                        # Create group if it doesn't exist
+                        group = Group.objects.create(name=role)
+                        user.groups.add(group)
+                
                 SystemLog.objects.create(
                     level='INFO',
                     log_type='USER',
@@ -202,7 +266,7 @@ class UserCreateView(APIView):
                     action='User created via API',
                     details={
                         'created_user': user.username,
-                        'role': request.data.get('role', 'User')
+                        'role': role
                     }
                 )
                 
@@ -216,6 +280,172 @@ class UserCreateView(APIView):
             'success': False,
             'errors': serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
+
+class UserDetailView(APIView):
+    permission_classes = [permissions.IsAdminUser]
+    
+    def get(self, request, user_id):
+        try:
+            user = User.objects.get(id=user_id)
+            serializer = UserSerializer(user)
+            return Response({
+                'success': True,
+                'user': serializer.data
+            })
+        except User.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': 'User not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+class ChangePasswordView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        serializer = PasswordChangeSerializer(data=request.data)
+        if serializer.is_valid():
+            user = request.user
+            
+            if not user.check_password(serializer.validated_data['old_password']):
+                return Response({
+                    'success': False,
+                    'error': 'Old password is incorrect'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            user.set_password(serializer.validated_data['new_password'])
+            user.save()
+            
+            update_session_auth_hash(request, user)
+            
+            SystemLog.objects.create(
+                level='SECURITY',
+                log_type='SECURITY',
+                user=user,
+                ip_address=request.META.get('REMOTE_ADDR'),
+                action='Password changed',
+                details={'username': user.username}
+            )
+            
+            return Response({
+                'success': True,
+                'message': 'Password changed successfully'
+            })
+        
+        return Response({
+            'success': False,
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+class UnlinkedUsersView(APIView):
+    """Get users not linked to any staff"""
+    permission_classes = [permissions.IsAdminUser]
+    
+    def get(self, request):
+        all_users = User.objects.all()
+        unlinked_users = []
+        
+        for user in all_users:
+            if hasattr(user, 'profile'):
+                if user.profile.staff_detail is None:
+                    unlinked_users.append(user)
+            else:
+                unlinked_users.append(user)
+        
+        serializer = UserSerializer(unlinked_users, many=True)
+        return Response({
+            'success': True,
+            'count': len(unlinked_users),
+            'users': serializer.data
+        })
+
+class UserPasswordResetView(APIView):
+    """Admin resets any user's password"""
+    permission_classes = [permissions.IsAdminUser]
+    
+    def post(self, request, user_id):
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': 'User not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        new_password = request.data.get('new_password')
+        if not new_password:
+            return Response({
+                'success': False,
+                'error': 'New password is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        if len(new_password) < 8:
+            return Response({
+                'success': False,
+                'error': 'Password must be at least 8 characters long'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        user.set_password(new_password)
+        user.save()
+        
+        SystemLog.objects.create(
+            level='SECURITY',
+            log_type='SECURITY',
+            user=request.user,
+            ip_address=request.META.get('REMOTE_ADDR'),
+            action=f'Password reset for user {user.username}',
+            details={'target_user_id': user_id}
+        )
+        
+        return Response({
+            'success': True,
+            'message': f'Password reset successfully for {user.username}'
+        })
+
+class UserDeleteView(APIView):
+    """Delete a user"""
+    permission_classes = [permissions.IsAdminUser]
+    
+    def delete(self, request, user_id):
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': 'User not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        if user.is_superuser and not request.user.is_superuser:
+            return Response({
+                'success': False,
+                'error': 'Cannot delete superuser account'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        username = user.username
+        
+        try:
+            if hasattr(user, 'profile') and user.profile.staff_detail:
+                staff = user.profile.staff_detail
+                staff.user = None
+                staff.account_active = False
+                staff.save()
+        except:
+            pass
+        
+        user.delete()
+        
+        SystemLog.objects.create(
+            level='WARNING',
+            log_type='USER',
+            user=request.user,
+            ip_address=request.META.get('REMOTE_ADDR'),
+            action=f'User deleted: {username}',
+            details={'deleted_user_id': user_id}
+        )
+        
+        return Response({
+            'success': True,
+            'message': f'User {username} deleted successfully'
+        })
 
 class SystemLogView(APIView):
     permission_classes = [permissions.IsAdminUser]
@@ -326,8 +556,8 @@ class DashboardStatsView(APIView):
             user_role = 'Super Admin'
         elif request.user.is_staff:
             user_role = 'Admin'
-        elif hasattr(request.user, 'staff_detail'):
-            user_role = request.user.staff_detail.Role
+        elif hasattr(request.user, 'profile') and request.user.profile.staff_detail:
+            user_role = request.user.profile.staff_detail.Role
         
         if request.user.is_staff or request.user.is_superuser:
             stats.update({
@@ -344,8 +574,8 @@ class DashboardStatsView(APIView):
                 ).count(),
             })
         
-        if hasattr(request.user, 'staff_detail'):
-            staff = request.user.staff_detail
+        if hasattr(request.user, 'profile') and request.user.profile.staff_detail:
+            staff = request.user.profile.staff_detail
             if staff.Role == 'Doctor':
                 stats.update({
                     'doctor_name': staff.Name,
@@ -367,46 +597,301 @@ class DashboardStatsView(APIView):
             'timestamp': timezone.now()
         })
 
-class ChangePasswordView(APIView):
+class TrackLogoutView(APIView):
+    """API endpoint to manually track user logout"""
     permission_classes = [IsAuthenticated]
     
     def post(self, request):
-        serializer = PasswordChangeSerializer(data=request.data)
-        if serializer.is_valid():
-            user = request.user
+        user = request.user
+        
+        try:
+            recent_login = LoginHistory.objects.filter(
+                user=user,
+                success=True,
+                logout_timestamp__isnull=True
+            ).order_by('-timestamp').first()
             
-            if not user.check_password(serializer.validated_data['old_password']):
+            if recent_login:
+                recent_login.mark_logout()
+                
+                SystemLog.objects.create(
+                    level='INFO',
+                    log_type='AUTH',
+                    user=user,
+                    ip_address=request.META.get('REMOTE_ADDR'),
+                    action='User manual logout recorded',
+                    details={'username': user.username}
+                )
+                
+                return Response({
+                    'success': True,
+                    'message': 'Logout recorded successfully',
+                    'login_id': recent_login.id,
+                    'login_time': recent_login.timestamp,
+                    'logout_time': recent_login.logout_timestamp
+                })
+            else:
                 return Response({
                     'success': False,
-                    'error': 'Old password is incorrect'
-                }, status=status.HTTP_400_BAD_REQUEST)
+                    'error': 'No active login session found'
+                }, status=status.HTTP_404_NOT_FOUND)
+                
+        except Exception as e:
+            logger.error(f"Error tracking logout for user {user.username}: {str(e)}")
+            return Response({
+                'success': False,
+                'error': str(e) if settings.DEBUG else 'Failed to record logout'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class LoginHistoryView(APIView):
+    permission_classes = [permissions.IsAdminUser]
+    
+    def get(self, request):
+        try:
+            login_type = request.query_params.get('login_type', '')
+            success = request.query_params.get('success', '')
+            username = request.query_params.get('username', '')
+            ip_address = request.query_params.get('ip_address', '')
+            start_date = request.query_params.get('start_date', '')
+            end_date = request.query_params.get('end_date', '')
+            show_active = request.query_params.get('show_active', 'false') == 'true'
+            sort_by = request.query_params.get('sort_by', '-timestamp')
+            page = int(request.query_params.get('page', 1))
+            page_size = min(int(request.query_params.get('page_size', 50)), 200)
             
-            user.set_password(serializer.validated_data['new_password'])
-            user.save()
+            logs = LoginHistory.objects.all()
             
-            update_session_auth_hash(request, user)
+            if login_type:
+                logs = logs.filter(login_type=login_type)
+            if success:
+                try:
+                    success_bool = success.lower() == 'true'
+                    logs = logs.filter(success=success_bool)
+                except:
+                    pass
+            if username:
+                logs = logs.filter(username__icontains=username)
+            if ip_address:
+                logs = logs.filter(ip_address__icontains=ip_address)
+            if start_date:
+                try:
+                    start = datetime.datetime.strptime(start_date, '%Y-%m-%d')
+                    logs = logs.filter(timestamp__gte=start)
+                except:
+                    pass
+            if end_date:
+                try:
+                    end = datetime.datetime.strptime(end_date, '%Y-%m-%d')
+                    end = end + datetime.timedelta(days=1)
+                    logs = logs.filter(timestamp__lte=end)
+                except:
+                    pass
+            if show_active:
+                logs = logs.filter(success=True, logout_timestamp__isnull=True)
             
-            SystemLog.objects.create(
-                level='SECURITY',
-                log_type='SECURITY',
-                user=user,
-                ip_address=request.META.get('REMOTE_ADDR'),
-                action='Password changed',
-                details={'username': user.username}
-            )
+            valid_sort_fields = ['id', 'username', 'login_type', 'success', 'timestamp', 
+                               'logout_timestamp', 'session_duration']
+            if sort_by.lstrip('-') in valid_sort_fields:
+                logs = logs.order_by(sort_by)
+            else:
+                logs = logs.order_by('-timestamp')
+            
+            total = logs.count()
+            offset = (page - 1) * page_size
+            paginated_logs = logs[offset:offset + page_size]
+            
+            logs_data = []
+            for log in paginated_logs:
+                logs_data.append({
+                    'id': log.id,
+                    'username': log.username or '',
+                    'login_type': log.login_type or '',
+                    'login_type_display': log.get_login_type_display(),
+                    'ip_address': log.ip_address or '',
+                    'user_agent': log.user_agent or '',
+                    'success': log.success,
+                    'timestamp': log.timestamp.isoformat() if log.timestamp else '',
+                    'logout_timestamp': log.logout_timestamp.isoformat() if log.logout_timestamp else '',
+                    'session_duration': log.session_duration,
+                    'session_duration_display': log.get_session_duration_display(),
+                    'user': log.user.username if log.user and hasattr(log.user, 'username') else None,
+                    'details': log.details or {},
+                    'is_active': log.success and not log.logout_timestamp
+                })
+            
+            today = timezone.now().date()
+            today_logs = LoginHistory.objects.filter(timestamp__date=today)
+            
+            active_sessions = LoginHistory.objects.filter(
+                success=True, 
+                logout_timestamp__isnull=True
+            ).count()
+            
+            avg_duration_result = LoginHistory.objects.filter(
+                success=True, 
+                session_duration__isnull=False
+            ).aggregate(Avg('session_duration'))
+            
+            stats = {
+                'total_logins': total,
+                'successful_logins': logs.filter(success=True).count(),
+                'failed_logins': logs.filter(success=False).count(),
+                'today_logins': today_logs.count(),
+                'today_successful': today_logs.filter(success=True).count(),
+                'today_failed': today_logs.filter(success=False).count(),
+                'active_sessions': active_sessions,
+                'avg_session_duration': avg_duration_result['session_duration__avg'] or 0
+            }
             
             return Response({
                 'success': True,
-                'message': 'Password changed successfully'
+                'logs': logs_data,
+                'stats': stats,
+                'pagination': {
+                    'page': page,
+                    'page_size': page_size,
+                    'total': total,
+                    'pages': (total + page_size - 1) // page_size if page_size > 0 else 0
+                }
             })
+            
+        except Exception as e:
+            logger.error(f"Error in LoginHistoryView: {str(e)}", exc_info=True)
+            return Response({
+                'success': False,
+                'error': 'Failed to fetch login history',
+                'detail': str(e) if settings.DEBUG else 'Internal server error'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+# authentication/views.py - Fix the ForceLogoutView
+class ForceLogoutView(APIView):
+    """API endpoint to force logout a user"""
+    permission_classes = [permissions.IsAdminUser]
+    
+    def post(self, request, login_id):
+        try:
+            login_record = LoginHistory.objects.get(id=login_id)
+            
+            if not login_record.success:
+                return Response({
+                    'success': False,
+                    'error': 'Cannot force logout a failed login attempt'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            if login_record.logout_timestamp:
+                return Response({
+                    'success': False,
+                    'error': 'User already logged out'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            login_record.mark_logout()
+            
+            # FIXED: Convert datetime objects to strings
+            SystemLog.objects.create(
+                level='WARNING',
+                log_type='SECURITY',
+                user=request.user,
+                ip_address=request.META.get('REMOTE_ADDR'),
+                action=f'Force logout for user {login_record.username}',
+                details={
+                    'target_username': login_record.username,
+                    'login_id': login_record.id,
+                    'login_time': login_record.timestamp.isoformat() if login_record.timestamp else None,
+                    'forced_by': request.user.username
+                }
+            )
+            
+            # FIXED: Convert datetime objects to strings for response
+            return Response({
+                'success': True,
+                'message': f'Force logged out {login_record.username}',
+                'login_id': login_record.id,
+                'username': login_record.username,
+                'login_time': login_record.timestamp.isoformat() if login_record.timestamp else None,
+                'logout_time': login_record.logout_timestamp.isoformat() if login_record.logout_timestamp else None,
+                'session_duration': login_record.session_duration
+            })
+            
+        except LoginHistory.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': 'Login record not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            logger.error(f"Error forcing logout: {str(e)}", exc_info=True)
+            return Response({
+                'success': False,
+                'error': str(e) if settings.DEBUG else 'Failed to force logout'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+
+# authentication/views.py - ADD THIS VIEW
+class StaffPasswordResetView(APIView):
+    """Reset password for a staff member's user account"""
+    permission_classes = [permissions.IsAdminUser]
+    
+    def post(self, request, staff_id=None):
+        try:
+            from adminapp.models import StaffDetail
+            staff = StaffDetail.objects.get(STAFF_ID=staff_id)
+        except StaffDetail.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': 'Staff not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Check if staff has a linked user account
+        if not staff.user:
+            return Response({
+                'success': False,
+                'error': 'Staff does not have a linked user account'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        user = staff.user
+        new_password = request.data.get('new_password')
+        
+        if not new_password:
+            return Response({
+                'success': False,
+                'error': 'New password is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        if len(new_password) < 8:
+            return Response({
+                'success': False,
+                'error': 'Password must be at least 8 characters long'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Update user password
+        user.set_password(new_password)
+        user.save()
+        
+        # Update staff record
+        staff.last_password_reset = timezone.now()
+        staff.save()
+        
+        # Log the action
+        SystemLog.objects.create(
+            level='SECURITY',
+            log_type='SECURITY',
+            user=request.user,
+            ip_address=request.META.get('REMOTE_ADDR'),
+            action=f'Reset password for staff {staff.Name} (username: {user.username})',
+            details={
+                'staff_id': staff.STAFF_ID,
+                'user_id': user.id,
+                'staff_name': staff.Name,
+                'username': user.username
+            }
+        )
         
         return Response({
-            'success': False,
-            'errors': serializer.errors
-        }, status=status.HTTP_400_BAD_REQUEST)
-    
-from rest_framework_simplejwt.views import TokenObtainPairView
-from .serializers import CustomTokenObtainPairSerializer
-
-class CustomTokenObtainPairView(TokenObtainPairView):
-    serializer_class = CustomTokenObtainPairSerializer
+            'success': True,
+            'message': f'Password reset successfully for {staff.Name}',
+            'staff': {
+                'id': staff.STAFF_ID,
+                'name': staff.Name,
+                'username': user.username,
+                'email': staff.Email
+            }
+        })

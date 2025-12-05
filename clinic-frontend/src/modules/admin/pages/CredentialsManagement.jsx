@@ -1,27 +1,101 @@
-// src/modules/admin/pages/CredentialsManagement.jsx - UPDATED WITH BACK BUTTON
-import React, { useEffect, useState } from "react";
+// src/modules/admin/pages/CredentialsManagement.jsx - UPDATED WITH STAFF NAME
+import React, { useState, useEffect } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { adminApi } from "../services/adminApi.js";
-import { useNavigate, Link } from "react-router-dom";
 
 const CredentialsManagement = () => {
   const [users, setUsers] = useState([]);
-  const [form, setForm] = useState({
-    username: "",
-    email: "",
-    password: "",
-    role: "User",
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [filters, setFilters] = useState({
+    search: "",
+    role: "",
+    account_status: "",
   });
-  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
   const fetchUsers = async () => {
-    setLoading(true);
     try {
-      const res = await adminApi.getUsers();
-      const data = res.data.results || res.data || [];
-      setUsers(data);
+      setLoading(true);
+      setError("");
+      
+      // Build query parameters
+      const params = {};
+      if (filters.search) params.search = filters.search;
+      if (filters.role) params.role = filters.role;
+      
+      const response = await adminApi.getUsers(params);
+      
+      let usersData = [];
+      
+      // Handle different response formats
+      if (response.data) {
+        if (Array.isArray(response.data)) {
+          usersData = response.data;
+        } else if (response.data.results && Array.isArray(response.data.results)) {
+          usersData = response.data.results;
+        } else if (response.data.data && Array.isArray(response.data.data)) {
+          usersData = response.data.data;
+        } else if (response.data.users && Array.isArray(response.data.users)) {
+          usersData = response.data.users;
+        }
+      }
+      
+      // Filter by account status if needed
+      if (filters.account_status === 'linked') {
+        usersData = usersData.filter(user => 
+          user.has_staff_account || 
+          (user.profile && user.profile.staff_detail)
+        );
+      } else if (filters.account_status === 'unlinked') {
+        usersData = usersData.filter(user => 
+          !user.has_staff_account && 
+          !(user.profile && user.profile.staff_detail)
+        );
+      }
+      
+      // Process users to extract staff information
+      usersData = usersData.map(user => {
+        // Extract staff information from different possible locations
+        let staffName = null;
+        let staffId = null;
+        let staffRole = null;
+        
+        // Check profile.staff_detail
+        if (user.profile && user.profile.staff_detail) {
+          staffName = user.profile.staff_detail.Name || 
+                     user.profile.staff_detail.name;
+          staffId = user.profile.staff_detail.STAFF_ID || 
+                   user.profile.staff_detail.id || 
+                   user.profile.staff_detail.staff_id;
+          staffRole = user.profile.staff_detail.Role || 
+                     user.profile.staff_detail.role;
+        }
+        // Check staff_detail directly
+        else if (user.staff_detail) {
+          staffName = user.staff_detail.Name || 
+                     user.staff_detail.name;
+          staffId = user.staff_detail.STAFF_ID || 
+                   user.staff_detail.id || 
+                   user.staff_detail.staff_id;
+          staffRole = user.staff_detail.Role || 
+                     user.staff_detail.role;
+        }
+        
+        return {
+          ...user,
+          staff_name: staffName,
+          staff_id: staffId,
+          staff_role: staffRole,
+          has_staff_link: !!staffName
+        };
+      });
+      
+      console.log("Processed users with staff info:", usersData);
+      setUsers(usersData);
     } catch (err) {
-      console.error("Failed to fetch users", err);
+      console.error("Error fetching users:", err);
+      setError("Failed to load user credentials.");
     } finally {
       setLoading(false);
     }
@@ -31,243 +105,335 @@ const CredentialsManagement = () => {
     fetchUsers();
   }, []);
 
-  const handleChange = (e) =>
-    setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+  const handleFilterChange = (e) => {
+    const { name, value } = e.target;
+    setFilters(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
 
-  const handleCreate = async (e) => {
+  const handleSearch = (e) => {
     e.preventDefault();
-    try {
-      await adminApi.createUser(form);
-      setForm({ username: "", email: "", password: "", role: "User" });
-      fetchUsers();
-    } catch (err) {
-      console.error("Failed to create user", err);
+    fetchUsers();
+  };
+
+  const clearFilters = () => {
+    setFilters({
+      search: "",
+      role: "",
+      account_status: "",
+    });
+    fetchUsers();
+  };
+
+  // UPDATED: Function to handle reset password navigation with staff name
+  const handleResetPassword = (user) => {
+    console.log("User data for reset:", user);
+    
+    // Extract staff ID
+    let staffId = user.staff_id || user.id;
+    
+    if (staffId) {
+      console.log("Navigating to reset password with ID:", staffId);
+      
+      // Navigate with user data in state
+      navigate(`/admin/staff/reset-password/${staffId}`, {
+        state: { 
+          user: user,
+          staffName: user.staff_name,
+          staffId: user.staff_id
+        }
+      });
+    } else {
+      alert("Cannot reset password: No valid ID found.");
     }
   };
 
-  return (
-    <div>
-      <div className="d-flex justify-content-between align-items-center mb-3">
+  // UPDATED: Function to check if user has staff link
+  const hasStaffLink = (user) => {
+    return user.has_staff_link || 
+           user.has_staff_account || 
+           (user.profile && user.profile.staff_detail) ||
+           user.staff_detail;
+  };
+
+  // Function to get staff name display
+  const getStaffNameDisplay = (user) => {
+    if (user.staff_name) {
+      return (
         <div>
-          <div className="d-flex align-items-center mb-2">
-            <Link to="/admin" className="btn btn-outline-secondary btn-sm me-2">
-              <i className="bi bi-arrow-left"></i>
-            </Link>
-            <h4 className="mb-0">Credentials Management</h4>
-          </div>
+          <div className="fw-medium">{user.staff_name}</div>
+          {user.staff_role && (
+            <small className="text-muted">{user.staff_role}</small>
+          )}
+          {user.staff_id && (
+            <small className="text-muted ms-2">ID: #{user.staff_id}</small>
+          )}
+        </div>
+      );
+    }
+    return <span className="text-muted">-</span>;
+  };
+
+  const getRoleBadge = (role) => {
+    const badgeClasses = {
+      'Super Admin': 'bg-danger',
+      'Admin': 'bg-warning',
+      'Doctor': 'bg-info',
+      'Receptionist': 'bg-success',
+      'Pharmacist': 'bg-primary',
+      'Lab Technician': 'bg-purple',
+      'default': 'bg-secondary'
+    };
+    
+    return badgeClasses[role] || badgeClasses.default;
+  };
+
+  const getAccountStatusBadge = (user) => {
+    if (user.is_active === false) {
+      return <span className="badge bg-danger">Inactive</span>;
+    }
+    
+    if (hasStaffLink(user)) {
+      return <span className="badge bg-success">Linked to Staff</span>;
+    }
+    
+    return <span className="badge bg-secondary">Standalone</span>;
+  };
+
+  return (
+    <div className="credentials-management">
+      <div className="d-flex justify-content-between align-items-center mb-4">
+        <div>
+          <h3 className="mb-1">User Credentials Management</h3>
           <p className="text-muted mb-0">
-            Create user accounts and manage login credentials.
+            Manage all user accounts, reset passwords, and view account status.
           </p>
         </div>
-        <button
-          className="btn btn-outline-primary"
-          onClick={() => navigate("/admin/change-password")}
-        >
-          <i className="bi bi-key me-1"></i>Change My Password
-        </button>
+        <div className="btn-group">
+          <Link to="/auth/users/create" className="btn btn-primary">
+            <i className="bi bi-person-plus me-2"></i>Create New User
+          </Link>
+        </div>
       </div>
 
-      <form className="card mb-4 shadow-sm border-0" onSubmit={handleCreate}>
+      {/* Filters Card */}
+      <div className="card shadow-sm border-0 mb-4">
         <div className="card-body">
-          <h6 className="mb-3">
-            <i className="bi bi-person-plus me-2"></i>
-            Create New Login Credentials
-          </h6>
-          <div className="row g-3">
-            <div className="col-12 col-md-3">
-              <label className="form-label">Username *</label>
-              <input
-                className="form-control"
-                name="username"
-                value={form.username}
-                onChange={handleChange}
-                required
-                placeholder="Enter username"
-              />
-            </div>
-            <div className="col-12 col-md-3">
-              <label className="form-label">Email *</label>
-              <input
-                type="email"
-                className="form-control"
-                name="email"
-                value={form.email}
-                onChange={handleChange}
-                required
-                placeholder="Enter email"
-              />
-            </div>
-            <div className="col-12 col-md-3">
-              <label className="form-label">Password *</label>
-              <input
-                type="password"
-                className="form-control"
-                name="password"
-                value={form.password}
-                onChange={handleChange}
-                required
-                placeholder="Enter password"
-                minLength="8"
-              />
-              <div className="form-text">Minimum 8 characters</div>
-            </div>
-            <div className="col-12 col-md-3">
-              <label className="form-label">Role *</label>
-              <select
-                className="form-select"
-                name="role"
-                value={form.role}
-                onChange={handleChange}
-                required
-              >
-                <option value="User">User</option>
-                <option value="Admin">Admin</option>
-                <option value="Doctor">Doctor</option>
-                <option value="Receptionist">Receptionist</option>
-                <option value="Lab Technician">Lab Technician</option>
-                <option value="Pharmacist">Pharmacist</option>
-              </select>
-            </div>
-          </div>
-          <div className="mt-3">
-            <button className="btn btn-primary" type="submit">
-              <i className="bi bi-person-plus me-1"></i>
-              Create User Account
-            </button>
-            <button 
-              type="button" 
-              className="btn btn-outline-secondary ms-2"
-              onClick={() => navigate("/admin/staff")}
-            >
-              <i className="bi bi-people me-1"></i>
-              Go to Staff Management
-            </button>
-          </div>
-        </div>
-      </form>
+          <h5 className="card-title mb-3">Filters & Search</h5>
+          <form onSubmit={handleSearch}>
+            <div className="row g-3">
+              <div className="col-12 col-md-4">
+                <label className="form-label">Search by Username, Email, or Name</label>
+                <div className="input-group">
+                  <span className="input-group-text">
+                    <i className="bi bi-search"></i>
+                  </span>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="Search..."
+                    name="search"
+                    value={filters.search}
+                    onChange={handleFilterChange}
+                  />
+                </div>
+              </div>
+              
+              <div className="col-6 col-md-3">
+                <label className="form-label">Role</label>
+                <select
+                  className="form-select"
+                  name="role"
+                  value={filters.role}
+                  onChange={handleFilterChange}
+                >
+                  <option value="">All Roles</option>
+                  <option value="Super Admin">Super Admin</option>
+                  <option value="Admin">Admin</option>
+                  <option value="Doctor">Doctor</option>
+                  <option value="Receptionist">Receptionist</option>
+                  <option value="Pharmacist">Pharmacist</option>
+                  <option value="Lab Technician">Lab Technician</option>
+                  <option value="Staff">Staff</option>
+                  <option value="User">User</option>
+                </select>
+              </div>
 
+              <div className="col-6 col-md-3">
+                <label className="form-label">Account Type</label>
+                <select
+                  className="form-select"
+                  name="account_status"
+                  value={filters.account_status}
+                  onChange={handleFilterChange}
+                >
+                  <option value="">All Accounts</option>
+                  <option value="linked">Linked to Staff</option>
+                  <option value="unlinked">Standalone Users</option>
+                </select>
+              </div>
+
+              <div className="col-12 d-flex gap-2 mt-2">
+                <button type="submit" className="btn btn-primary">
+                  <i className="bi bi-funnel me-1"></i>Apply Filters
+                </button>
+                <button 
+                  type="button" 
+                  className="btn btn-outline-secondary"
+                  onClick={clearFilters}
+                >
+                  <i className="bi bi-x-circle me-1"></i>Clear All
+                </button>
+                <button 
+                  type="button" 
+                  className="btn btn-outline-info"
+                  onClick={fetchUsers}
+                >
+                  <i className="bi bi-arrow-clockwise me-1"></i>Refresh
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {/* Users Table Card */}
       <div className="card shadow-sm border-0">
-        <div className="card-header bg-transparent border-0">
-          <h5 className="mb-0">
-            <i className="bi bi-people me-2"></i>
-            User Accounts ({users.length})
-          </h5>
-        </div>
         <div className="card-body p-0">
-          <div className="table-responsive">
-            <table className="table mb-0 table-hover align-middle">
-              <thead className="table-light">
-                <tr>
-                  <th>ID</th>
-                  <th>Username</th>
-                  <th>Email</th>
-                  <th>Role</th>
-                  <th>Staff Account</th>
-                  <th>Is Staff</th>
-                  <th>Is Superuser</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
+          {error && (
+            <div className="alert alert-danger m-3">
+              <i className="bi bi-exclamation-triangle me-2"></i>
+              {error}
+            </div>
+          )}
+
+          {loading ? (
+            <div className="text-center py-5">
+              <div className="spinner-border text-primary" role="status">
+                <span className="visually-hidden">Loading...</span>
+              </div>
+              <p className="mt-3">Loading user credentials...</p>
+            </div>
+          ) : users.length === 0 ? (
+            <div className="text-center py-5">
+              <i className="bi bi-people display-1 text-muted"></i>
+              <h5 className="mt-3">No Users Found</h5>
+              <p className="text-muted">
+                {filters.search || filters.role || filters.account_status
+                  ? "No users match your filters. Try different criteria." 
+                  : "No users found."}
+              </p>
+              <Link to="/auth/users/create" className="btn btn-primary mt-2">
+                <i className="bi bi-person-plus me-1"></i>Create New User
+              </Link>
+            </div>
+          ) : (
+            <div className="table-responsive">
+              <table className="table table-hover align-middle mb-0">
+                <thead className="table-light">
                   <tr>
-                    <td colSpan={8} className="text-center py-4">
-                      <div className="spinner-border spinner-border-sm text-primary me-2"></div>
-                      Loading users...
-                    </td>
+                    <th>Username</th>
+                    <th>Staff Name</th>
+                    <th>Email</th>
+                    <th>User Role</th>
+                    <th>Account Status</th>
+                    <th>Staff Link</th>
+                    <th className="text-end">Actions</th>
                   </tr>
-                ) : users.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="text-center py-4 text-muted">
-                      <i className="bi bi-people display-6"></i>
-                      <p className="mt-2">No user accounts found.</p>
-                      <button className="btn btn-sm btn-outline-primary" onClick={fetchUsers}>
-                        <i className="bi bi-arrow-clockwise me-1"></i>
-                        Refresh
-                      </button>
-                    </td>
-                  </tr>
-                ) : (
-                  users.map((u) => (
-                    <tr key={u.id}>
-                      <td>
-                        <span className="badge bg-secondary">#{u.id}</span>
-                      </td>
-                      <td>
-                        <strong>{u.username}</strong>
-                        <div className="small text-muted">
-                          Joined: {u.date_joined ? new Date(u.date_joined).toLocaleDateString() : 'N/A'}
-                        </div>
-                      </td>
-                      <td>{u.email}</td>
-                      <td>
-                        <span className={`badge ${
-                          u.role === 'Admin' ? 'bg-danger' :
-                          u.role === 'Doctor' ? 'bg-info' :
-                          u.role === 'Receptionist' ? 'bg-warning' :
-                          'bg-secondary'
-                        }`}>
-                          {u.role}
-                        </span>
-                      </td>
-                      <td>
-                        {u.staff_detail ? (
-                          <span className="badge bg-success">
-                            <i className="bi bi-link-45deg me-1"></i>
-                            Linked
+                </thead>
+                <tbody>
+                  {users.map((user) => {
+                    const isLinked = hasStaffLink(user);
+                    return (
+                      <tr key={user.id}>
+                        <td>
+                          <div className="fw-medium">{user.username}</div>
+                          <small className="text-muted">User ID: #{user.id}</small>
+                        </td>
+                        <td>
+                          {getStaffNameDisplay(user)}
+                        </td>
+                        <td>{user.email || <span className="text-muted">-</span>}</td>
+                        <td>
+                          <span className={`badge ${getRoleBadge(user.role)}`}>
+                            {user.role || 'User'}
                           </span>
-                        ) : (
-                          <span className="badge bg-danger">
-                            <i className="bi bi-unlink me-1"></i>
-                            Not Linked
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        {u.is_staff ? (
-                          <span className="badge bg-success">Yes</span>
-                        ) : (
-                          <span className="badge bg-secondary">No</span>
-                        )}
-                      </td>
-                      <td>
-                        {u.is_superuser ? (
-                          <span className="badge bg-danger">Yes</span>
-                        ) : (
-                          <span className="badge bg-secondary">No</span>
-                        )}
-                      </td>
-                      <td>
-                        <div className="btn-group btn-group-sm">
-                          <button className="btn btn-outline-primary" title="Edit">
-                            <i className="bi bi-pencil"></i>
-                          </button>
-                          <button className="btn btn-outline-warning" title="Reset Password">
-                            <i className="bi bi-key"></i>
-                          </button>
-                          <button className="btn btn-outline-danger" title="Delete">
-                            <i className="bi bi-trash"></i>
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                        </td>
+                        <td>
+                          {getAccountStatusBadge(user)}
+                          {user.is_superuser && (
+                            <span className="badge bg-dark ms-1">Superuser</span>
+                          )}
+                        </td>
+                        <td>
+                          {isLinked ? (
+                            <span className="badge bg-success">
+                              <i className="bi bi-link-45deg me-1"></i>
+                              Linked
+                            </span>
+                          ) : (
+                            <span className="badge bg-secondary">
+                              <i className="bi bi-unlink me-1"></i>
+                              Not Linked
+                            </span>
+                          )}
+                        </td>
+                        <td className="text-end">
+                          <div className="btn-group btn-group-sm" style={{ gap: '5px' }}>
+                            {/* Reset Password Button */}
+                            <button
+                              className={`btn btn-warning btn-sm ${!isLinked ? 'disabled opacity-75' : ''}`}
+                              onClick={() => handleResetPassword(user)}
+                              title={isLinked ? "Reset Password" : "No staff link found"}
+                              disabled={!isLinked}
+                            >
+                              <i className="bi bi-key"></i> 
+                            </button>
+                            
+                            
+                            <button
+                              className="btn btn-outline-danger btn-sm"
+                              onClick={() => {
+                                if (window.confirm(`Delete user ${user.username}?`)) {
+                                  // Add delete functionality here
+                                  alert("Delete functionality to be implemented");
+                                }
+                              }}
+                              title="Delete User"
+                            >
+                              <i className="bi bi-trash"></i>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
-        <div className="card-footer bg-transparent border-0 d-flex justify-content-between align-items-center">
-          <div className="text-muted small">
-            Showing {users.length} user{users.length !== 1 ? 's' : ''}
+        
+        {users.length > 0 && (
+          <div className="card-footer bg-transparent border-0 d-flex justify-content-between align-items-center">
+            <div className="text-muted small">
+              <i className="bi bi-info-circle me-1"></i>
+              Showing {users.length} user{users.length !== 1 ? 's' : ''}
+              ({users.filter(u => u.has_staff_link).length} linked to staff)
+            </div>
+            <div className="d-flex gap-2">
+              <button 
+                className="btn btn-outline-secondary btn-sm"
+                onClick={fetchUsers}
+                title="Refresh List"
+              >
+                <i className="bi bi-arrow-clockwise"></i>
+              </button>
+            </div>
           </div>
-          <div>
-            <button className="btn btn-outline-secondary btn-sm" onClick={fetchUsers}>
-              <i className="bi bi-arrow-clockwise me-1"></i>
-              Refresh
-            </button>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );

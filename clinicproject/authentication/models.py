@@ -1,8 +1,10 @@
+# authentication/models.py - COMPLETE FIXED VERSION
 from django.db import models
 from django.contrib.auth.models import User, Group
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.utils import timezone
+from adminapp.models import StaffDetail
 
 class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
@@ -17,6 +19,11 @@ class UserProfile(models.Model):
     
     def __str__(self):
         return f"{self.user.username} - {self.staff_detail.Role if self.staff_detail else 'Admin'}"
+    
+    def update_last_activity(self):
+        """Update the last activity timestamp"""
+        self.last_activity = timezone.now()
+        self.save()
 
 class SystemLog(models.Model):
     LOG_LEVEL_CHOICES = [
@@ -50,8 +57,7 @@ class SystemLog(models.Model):
     
     def __str__(self):
         return f"{self.timestamp} - {self.level} - {self.action}"
-    
-# Add to authentication/models.py
+
 class LoginHistory(models.Model):
     LOGIN_TYPE_CHOICES = [
         ('ADMIN', 'Admin Login'),
@@ -61,12 +67,14 @@ class LoginHistory(models.Model):
     
     id = models.AutoField(primary_key=True)
     user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
-    username = models.CharField(max_length=150)  # Store username even if user doesn't exist
+    username = models.CharField(max_length=150)
     login_type = models.CharField(max_length=10, choices=LOGIN_TYPE_CHOICES)
     ip_address = models.GenericIPAddressField(null=True, blank=True)
     user_agent = models.TextField(null=True, blank=True)
     success = models.BooleanField(default=True)
     timestamp = models.DateTimeField(auto_now_add=True)
+    logout_timestamp = models.DateTimeField(null=True, blank=True)
+    session_duration = models.IntegerField(null=True, blank=True, help_text="Session duration in seconds")
     details = models.JSONField(null=True, blank=True)
     
     class Meta:
@@ -78,6 +86,35 @@ class LoginHistory(models.Model):
     def __str__(self):
         status = "Success" if self.success else "Failed"
         return f"{self.username} - {self.get_login_type_display()} - {status} - {self.timestamp}"
+    
+    def mark_logout(self):
+        """Mark the logout time and calculate session duration"""
+        if self.success and not self.logout_timestamp:
+            self.logout_timestamp = timezone.now()
+            if self.timestamp:
+                self.session_duration = (self.logout_timestamp - self.timestamp).seconds
+            self.save()
+    
+    def get_session_duration_display(self):
+        """Format session duration for display"""
+        if not self.session_duration:
+            return "Still logged in" if not self.logout_timestamp else "N/A"
+        
+        hours = self.session_duration // 3600
+        minutes = (self.session_duration % 3600) // 60
+        seconds = self.session_duration % 60
+        
+        if hours > 0:
+            return f"{hours}h {minutes}m {seconds}s"
+        elif minutes > 0:
+            return f"{minutes}m {seconds}s"
+        else:
+            return f"{seconds}s"
+    
+    @property
+    def is_active(self):
+        """Check if session is still active"""
+        return self.success and not self.logout_timestamp
 
 class ActivityMonitor(models.Model):
     id = models.AutoField(primary_key=True)
