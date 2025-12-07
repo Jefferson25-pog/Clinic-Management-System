@@ -6,7 +6,6 @@ from . import views
 router = DefaultRouter()
 router.register(r'patients', views.PatientDetailsViewSet)
 router.register(r'appointments', views.AppointmentDetailsViewSet)
-router.register(r'logs', views.ReceptionistLogViewSet)
 router.register(r'doctors', views.DoctorsViewSet)
 router.register(r'bills', views.BillDetailsViewSet)
 

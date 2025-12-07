@@ -1,4 +1,4 @@
-// src/modules/admin/pages/staff/StaffAdd.jsx
+// src/modules/admin/pages/staff/StaffAdd.jsx - UPDATED VERSION
 import React, { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { adminApi } from "../../services/adminApi.js";
@@ -9,50 +9,235 @@ const StaffAdd = () => {
   const [error, setError] = useState("");
   const [departments, setDepartments] = useState([]);
   const [formData, setFormData] = useState({
+    // Personal Information
     Name: "",
-    Age: "",
+    Gender: "Male",
+    Date_of_Birth: "", // Added DOB field
+    Blood_Group: "A+",
+    
+    // Contact Information
     Address: "",
+    City: "",
+    State: "",
+    Pincode: "",
     Phone_Number: "",
+    Alternate_Phone: "",
+    Emergency_Contact: "",
     Email: "",
+    
+    // Professional Information
     Role: "Doctor",
-    Department: "",
+    Qualification: "",
+    Specialization: "",
+    Experience: "",
+    License_Number: "",
     Consultation_fees: "",
-    Status: "Available"
+    Department: "",
+    
+    // Employment Details
+    Joining_Date: new Date().toISOString().split('T')[0], // Today's date
+    Shift_Timing: "09:00 AM - 05:00 PM",
+    Salary: "",
+    
+    // Bank Details
+    Bank_Name: "",
+    Account_Number: "",
+    IFSC_Code: "",
+    
+    // Additional Info
+    Notes: ""
   });
 
-  const roleOptions = [
-    { value: "Admin", label: "Admin" },
-    { value: "Doctor", label: "Doctor" },
-    { value: "Receptionist", label: "Receptionist" },
-    { value: "Lab Technician", label: "Lab Technician" },
-    { value: "Pharmacist", label: "Pharmacist" }
+  // Options for dropdowns
+  const genderOptions = ["Male", "Female", "Other"];
+  const bloodGroupOptions = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
+  
+  // Roles WITH user accounts
+  const rolesWithAccounts = [
+    { value: "Doctor", label: "Doctor", canHaveAccount: true },
+    { value: "Admin", label: "Admin", canHaveAccount: true },
+    { value: "Receptionist", label: "Receptionist", canHaveAccount: true },
+    { value: "Lab Technician", label: "Lab Technician", canHaveAccount: true },
+    { value: "Pharmacist", label: "Pharmacist", canHaveAccount: true },
+  ];
+  
+  // Roles WITHOUT user accounts
+  const rolesWithoutAccounts = [
+    { value: "Nurse", label: "Nurse", canHaveAccount: false },
+    { value: "Physiotherapist", label: "Physiotherapist", canHaveAccount: false },
+    { value: "Radiologist", label: "Radiologist", canHaveAccount: false },
+    { value: "Accountant", label: "Accountant", canHaveAccount: false },
+    { value: "Ward Boy", label: "Ward Boy", canHaveAccount: false },
+    { value: "Cleaner", label: "Cleaner", canHaveAccount: false },
+    { value: "Security Guard", label: "Security Guard", canHaveAccount: false },
   ];
 
-  const statusOptions = [
-    { value: "Available", label: "Available" },
-    { value: "Busy", label: "Busy" },
-    { value: "On Leave", label: "On Leave" }
+  const shiftOptions = [
+    "09:00 AM - 05:00 PM",
+    "10:00 AM - 06:00 PM", 
+    "02:00 PM - 10:00 PM",
+    "Night Shift",
+    "Flexible"
   ];
 
   useEffect(() => {
     fetchDepartments();
   }, []);
 
+  // Calculate age from DOB
+  const calculateAge = (dob) => {
+    if (!dob) return "";
+    const birthDate = new Date(dob);
+    const today = new Date();
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    return age;
+  };
+
+  // Check if role can have user account
+  const canHaveUserAccount = (role) => {
+    const rolesWithAccountsList = ["Doctor", "Admin", "Receptionist", "Lab Technician", "Pharmacist"];
+    return rolesWithAccountsList.includes(role);
+  };
+
   const fetchDepartments = async () => {
     try {
       const response = await adminApi.getDepartments();
-      setDepartments(response.data.results || response.data);
+      let departmentsData = [];
+      if (response.data) {
+        if (Array.isArray(response.data)) departmentsData = response.data;
+        else if (response.data.results) departmentsData = response.data.results;
+        else if (response.data.data) departmentsData = response.data.data;
+      }
+      setDepartments(departmentsData);
     } catch (err) {
       console.error("Error fetching departments:", err);
     }
   };
 
   const handleChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
+    const { name, value, type } = e.target;
+    
+    const updatedData = {
+      ...formData,
+      [name]: type === 'checkbox' ? e.target.checked : value
+    };
+    
+    // Calculate age when DOB changes
+    if (name === "Date_of_Birth") {
+      const age = calculateAge(value);
+      updatedData.Age = age;
+      
+      // Validate DOB (at least 18 years old)
+      if (age && age < 18) {
+        setError("Staff must be at least 18 years old");
+      } else {
+        setError("");
+      }
+    }
+    
+    // Check if role change affects department requirement
+    if (name === "Role") {
+      // Clear department for non-doctors
+      if (value !== "Doctor") {
+        updatedData.Department = "";
+        updatedData.Consultation_fees = "";
+        updatedData.Specialization = "";
+      }
+    }
+    
+    // Validate Joining Date (cannot be in the past)
+    if (name === "Joining_Date") {
+      const selectedDate = new Date(value);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      if (selectedDate < today) {
+        setError("Joining date cannot be in the past. It must be today or in the future.");
+      } else {
+        setError("");
+      }
+    }
+    
+    setFormData(updatedData);
+  };
+
+  const validateForm = () => {
+    const errors = [];
+
+    // Required validations
+    if (!formData.Name.trim()) errors.push("Name is required");
+    if (!formData.Email) errors.push("Email is required");
+    if (!formData.Phone_Number) errors.push("Phone Number is required");
+    if (!formData.Role) errors.push("Role is required");
+    if (!formData.Date_of_Birth) errors.push("Date of Birth is required");
+
+    // Email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (formData.Email && !emailRegex.test(formData.Email)) {
+      errors.push("Please enter a valid email address");
+    }
+
+    // Phone validation (10 digits starting with 6-9)
+    const phoneRegex = /^[6-9]\d{9}$/;
+    if (formData.Phone_Number && !phoneRegex.test(formData.Phone_Number)) {
+      errors.push("Phone number must start with 6-9 and be exactly 10 digits");
+    }
+
+    // Date of Birth validation (must be at least 18 years ago)
+    if (formData.Date_of_Birth) {
+      const dob = new Date(formData.Date_of_Birth);
+      const today = new Date();
+      const minBirthDate = new Date();
+      minBirthDate.setFullYear(today.getFullYear() - 18);
+      
+      if (dob > minBirthDate) {
+        errors.push("Staff member must be at least 18 years old");
+      }
+      
+      // Doctor-specific: at least 25 years old
+      if (formData.Role === "Doctor") {
+        const minDoctorBirthDate = new Date();
+        minDoctorBirthDate.setFullYear(today.getFullYear() - 25);
+        if (dob > minDoctorBirthDate) {
+          errors.push("Doctors must be at least 25 years old");
+        }
+      }
+    }
+
+    // Joining Date validation (cannot be in the past)
+    if (formData.Joining_Date) {
+      const joiningDate = new Date(formData.Joining_Date);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0); // Set to start of day for comparison
+      
+      if (joiningDate < today) {
+        errors.push("Joining date cannot be in the past");
+      }
+    }
+
+    // Doctor-specific validations
+    if (formData.Role === "Doctor") {
+      if (!formData.Department) errors.push("Doctors must be assigned to a department");
+      if (!formData.Qualification) errors.push("Qualification is required for doctors");
+      if (!formData.License_Number) errors.push("License number is required for doctors");
+      const fees = parseFloat(formData.Consultation_fees);
+      if (isNaN(fees) || fees <= 0) {
+        errors.push("Doctors must have consultation fees greater than 0");
+      }
+    }
+
+    // Salary validation
+    const salary = parseFloat(formData.Salary);
+    if (formData.Salary && (isNaN(salary) || salary < 0)) {
+      errors.push("Salary must be a valid positive number");
+    }
+
+    return errors;
   };
 
   const handleSubmit = async (e) => {
@@ -60,62 +245,53 @@ const StaffAdd = () => {
     setLoading(true);
     setError("");
 
+    // Validate form
+    const validationErrors = validateForm();
+    if (validationErrors.length > 0) {
+      setError(validationErrors.join(", "));
+      setLoading(false);
+      return;
+    }
+
     try {
-      // Validate required fields
-      if (!formData.Name || !formData.Email || !formData.Phone_Number) {
-        throw new Error("Name, Email, and Phone Number are required");
-      }
-
-      // Validate email format
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(formData.Email)) {
-        throw new Error("Please enter a valid email address");
-      }
-
-      // Validate phone number (10 digits)
-      const phoneRegex = /^\d{10}$/;
-      if (!phoneRegex.test(formData.Phone_Number)) {
-        throw new Error("Phone number must be exactly 10 digits");
-      }
-
-      // Validate age
-      const age = parseInt(formData.Age);
-      if (age < 18 || age > 70) {
-        throw new Error("Age must be between 18 and 70");
-      }
-
-      // Doctor-specific validations
-      if (formData.Role === "Doctor") {
-        if (!formData.Department) {
-          throw new Error("Doctors must be assigned to a department");
-        }
-        const fees = parseFloat(formData.Consultation_fees);
-        if (isNaN(fees) || fees <= 0) {
-          throw new Error("Doctors must have consultation fees greater than 0");
-        }
-      }
-
       // Prepare data for API
       const submitData = { ...formData };
-      if (submitData.Age) submitData.Age = parseInt(submitData.Age);
-      if (submitData.Consultation_fees) {
-        submitData.Consultation_fees = parseFloat(submitData.Consultation_fees);
-      }
-
-      // Remove Department if not Doctor
+      
+      // Remove Age field (backend will calculate it from DOB)
+      delete submitData.Age;
+      
+      // Convert numeric fields
+      if (submitData.Experience) submitData.Experience = parseInt(submitData.Experience);
+      if (submitData.Consultation_fees) submitData.Consultation_fees = parseFloat(submitData.Consultation_fees);
+      if (submitData.Salary) submitData.Salary = parseFloat(submitData.Salary);
+      
+      // Clear department for non-doctors
       if (submitData.Role !== "Doctor") {
         submitData.Department = null;
         submitData.Consultation_fees = 0;
+        submitData.Specialization = "";
       }
 
+      // Remove empty fields
+      Object.keys(submitData).forEach(key => {
+        if (submitData[key] === "" || submitData[key] === null || submitData[key] === undefined) {
+          delete submitData[key];
+        }
+      });
+
+      console.log("Submitting data:", submitData);
       const response = await adminApi.createStaff(submitData);
       
       alert("Staff added successfully!");
       navigate("/admin/staff");
       
     } catch (err) {
-      setError(err.response?.data?.message || err.message || "Failed to add staff");
       console.error("Error adding staff:", err);
+      const errorMessage = err.response?.data?.error || 
+                          err.response?.data?.message || 
+                          err.message || 
+                          "Failed to add staff. Please try again.";
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -126,278 +302,369 @@ const StaffAdd = () => {
       <div className="d-flex justify-content-between align-items-center mb-4">
         <div>
           <h3 className="mb-1">Add New Staff Member</h3>
-          <p className="text-muted mb-0">
-            Fill in the details to add a new staff member to the system
-          </p>
+          <p className="text-muted mb-0">Fill in all required details to add a new staff member</p>
         </div>
         <Link to="/admin/staff" className="btn btn-outline-secondary">
           <i className="bi bi-arrow-left me-1"></i>Back to List
         </Link>
       </div>
 
-      <div className="row">
-        <div className="col-12 col-lg-8">
-          <div className="card shadow-sm border-0">
-            <div className="card-body">
-              {error && (
-                <div className="alert alert-danger">
-                  <i className="bi bi-exclamation-triangle me-2"></i>
-                  {error}
-                </div>
-              )}
+      {error && (
+        <div className="alert alert-danger mb-4">
+          <i className="bi bi-exclamation-triangle me-2"></i>
+          {error}
+        </div>
+      )}
 
-              <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit}>
+        <div className="row">
+          {/* ============= PERSONAL INFORMATION ============= */}
+          <div className="col-12">
+            <div className="card shadow-sm border-0 mb-4">
+              <div className="card-header bg-light">
+                <h5 className="mb-0">
+                  <i className="bi bi-person-badge me-2"></i>
+                  Personal Information
+                </h5>
+              </div>
+              <div className="card-body">
                 <div className="row">
-                  {/* Basic Information */}
-                  <div className="col-12">
-                    <h5 className="mb-3 border-bottom pb-2">
-                      <i className="bi bi-person-badge me-2"></i>
-                      Basic Information
-                    </h5>
-                  </div>
-
                   <div className="col-md-6 mb-3">
                     <label className="form-label">Full Name *</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      name="Name"
-                      value={formData.Name}
-                      onChange={handleChange}
-                      required
-                      placeholder="Enter full name"
-                    />
-                    <div className="form-text">Letters, spaces, dots and hyphens only</div>
+                    <input type="text" className="form-control" name="Name" 
+                      value={formData.Name} onChange={handleChange} required />
                   </div>
 
+                  <div className="col-md-3 mb-3">
+                    <label className="form-label">Gender</label>
+                    <select className="form-select" name="Gender" 
+                      value={formData.Gender} onChange={handleChange}>
+                      {genderOptions.map(option => (
+                        <option key={option} value={option}>{option}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="col-md-3 mb-3">
+                    <label className="form-label">Date of Birth *</label>
+                    <input 
+                      type="date" 
+                      className="form-control" 
+                      name="Date_of_Birth" 
+                      value={formData.Date_of_Birth} 
+                      onChange={handleChange} 
+                      max={new Date(new Date().setFullYear(new Date().getFullYear() - 18)).toISOString().split('T')[0]}
+                      required 
+                    />
+                    <small className="text-muted">
+                      {formData.Age ? `Age: ${formData.Age} years` : "Must be at least 18 years old"}
+                    </small>
+                  </div>
+
+                  <div className="col-md-4 mb-3">
+                    <label className="form-label">Blood Group</label>
+                    <select className="form-select" name="Blood_Group" 
+                      value={formData.Blood_Group} onChange={handleChange}>
+                      {bloodGroupOptions.map(option => (
+                        <option key={option} value={option}>{option}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ============= CONTACT INFORMATION ============= */}
+          <div className="col-12">
+            <div className="card shadow-sm border-0 mb-4">
+              <div className="card-header bg-light">
+                <h5 className="mb-0">
+                  <i className="bi bi-telephone me-2"></i>
+                  Contact Information
+                </h5>
+              </div>
+              <div className="card-body">
+                <div className="row">
                   <div className="col-md-6 mb-3">
-                    <label className="form-label">Age *</label>
-                    <input
-                      type="number"
-                      className="form-control"
-                      name="Age"
-                      value={formData.Age}
-                      onChange={handleChange}
-                      min="18"
-                      max="70"
-                      required
-                    />
-                    <div className="form-text">Must be between 18 and 70 years</div>
-                  </div>
-
-                  <div className="col-12 mb-3">
-                    <label className="form-label">Address</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      name="Address"
-                      value={formData.Address}
-                      onChange={handleChange}
-                      placeholder="Enter address"
-                    />
+                    <label className="form-label">Email Address *</label>
+                    <input type="email" className="form-control" name="Email" 
+                      value={formData.Email} onChange={handleChange} required />
                   </div>
 
                   <div className="col-md-6 mb-3">
                     <label className="form-label">Phone Number *</label>
-                    <input
-                      type="tel"
-                      className="form-control"
-                      name="Phone_Number"
-                      value={formData.Phone_Number}
-                      onChange={handleChange}
-                      pattern="\d{10}"
-                      maxLength="10"
-                      required
-                      placeholder="10-digit phone number"
-                    />
-                    <div className="form-text">Exactly 10 digits, no spaces or symbols</div>
+                    <input type="tel" className="form-control" name="Phone_Number" 
+                      value={formData.Phone_Number} onChange={handleChange} 
+                      pattern="[6-9]\d{9}" maxLength="10" required 
+                      title="Phone must start with 6-9 and be 10 digits" />
                   </div>
 
                   <div className="col-md-6 mb-3">
-                    <label className="form-label">Email Address *</label>
-                    <input
-                      type="email"
-                      className="form-control"
-                      name="Email"
-                      value={formData.Email}
-                      onChange={handleChange}
-                      required
-                      placeholder="Enter email address"
-                    />
+                    <label className="form-label">Alternate Phone</label>
+                    <input type="tel" className="form-control" name="Alternate_Phone" 
+                      value={formData.Alternate_Phone} onChange={handleChange} 
+                      pattern="[6-9]\d{9}" maxLength="10" 
+                      title="Phone must start with 6-9 and be 10 digits" />
                   </div>
 
-                  {/* Role and Status */}
-                  <div className="col-12 mt-4">
-                    <h5 className="mb-3 border-bottom pb-2">
-                      <i className="bi bi-briefcase me-2"></i>
-                      Role & Status
-                    </h5>
+                  <div className="col-md-6 mb-3">
+                    <label className="form-label">Emergency Contact</label>
+                    <input type="tel" className="form-control" name="Emergency_Contact" 
+                      value={formData.Emergency_Contact} onChange={handleChange} 
+                      pattern="[6-9]\d{9}" maxLength="10" 
+                      title="Phone must start with 6-9 and be 10 digits" />
                   </div>
 
+                  <div className="col-12 mb-3">
+                    <label className="form-label">Address *</label>
+                    <textarea className="form-control" name="Address" rows="3" 
+                      value={formData.Address} onChange={handleChange} required />
+                  </div>
+
+                  <div className="col-md-4 mb-3">
+                    <label className="form-label">City</label>
+                    <input type="text" className="form-control" name="City" 
+                      value={formData.City} onChange={handleChange} />
+                  </div>
+
+                  <div className="col-md-4 mb-3">
+                    <label className="form-label">State</label>
+                    <input type="text" className="form-control" name="State" 
+                      value={formData.State} onChange={handleChange} />
+                  </div>
+
+                  <div className="col-md-4 mb-3">
+                    <label className="form-label">Pincode</label>
+                    <input type="text" className="form-control" name="Pincode" 
+                      value={formData.Pincode} onChange={handleChange} pattern="\d{6}" maxLength="6" 
+                      title="6-digit pincode" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ============= PROFESSIONAL INFORMATION ============= */}
+          <div className="col-12">
+            <div className="card shadow-sm border-0 mb-4">
+              <div className="card-header bg-light">
+                <h5 className="mb-0">
+                  <i className="bi bi-briefcase me-2"></i>
+                  Professional Information
+                </h5>
+              </div>
+              <div className="card-body">
+                <div className="row">
                   <div className="col-md-6 mb-3">
                     <label className="form-label">Role *</label>
-                    <select
-                      className="form-select"
-                      name="Role"
-                      value={formData.Role}
-                      onChange={handleChange}
-                      required
-                    >
-                      {roleOptions.map(option => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
+                    <select className="form-select" name="Role" 
+                      value={formData.Role} onChange={handleChange} required>
+                      {/* Roles with user accounts */}
+                      <optgroup label="Roles with User Accounts">
+                        {rolesWithAccounts.map(option => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                      {/* Roles without user accounts */}
+                      <optgroup label="Other Roles (No User Account)">
+                        {rolesWithoutAccounts.map(option => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </optgroup>
                     </select>
+                    {!canHaveUserAccount(formData.Role) && (
+                      <div className="alert alert-warning mt-2 p-2">
+                        <small>
+                          <i className="bi bi-info-circle me-1"></i>
+                          This role cannot have a user account. User account creation will be disabled.
+                        </small>
+                      </div>
+                    )}
                   </div>
 
                   <div className="col-md-6 mb-3">
-                    <label className="form-label">Status *</label>
-                    <select
-                      className="form-select"
-                      name="Status"
-                      value={formData.Status}
-                      onChange={handleChange}
-                      required
-                    >
-                      {statusOptions.map(option => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
+                    <label className="form-label">Qualification</label>
+                    <input type="text" className="form-control" name="Qualification" 
+                      value={formData.Qualification} onChange={handleChange} 
+                      required={formData.Role === "Doctor"} />
                   </div>
 
-                  {/* Doctor Specific Fields */}
+                  <div className="col-md-6 mb-3">
+                    <label className="form-label">Specialization</label>
+                    <input type="text" className="form-control" name="Specialization" 
+                      value={formData.Specialization} onChange={handleChange} />
+                  </div>
+
+                  <div className="col-md-6 mb-3">
+                    <label className="form-label">Experience (Years)</label>
+                    <input type="number" className="form-control" name="Experience" 
+                      value={formData.Experience} onChange={handleChange} min="0" max="50" />
+                  </div>
+
+                  <div className="col-md-6 mb-3">
+                    <label className="form-label">License Number</label>
+                    <input type="text" className="form-control" name="License_Number" 
+                      value={formData.License_Number} onChange={handleChange} 
+                      required={formData.Role === "Doctor"} />
+                  </div>
+
                   {formData.Role === "Doctor" && (
                     <>
-                      <div className="col-12 mt-4">
-                        <h5 className="mb-3 border-bottom pb-2">
-                          <i className="bi bi-hospital me-2"></i>
-                          Doctor Information
-                        </h5>
+                      <div className="col-md-6 mb-3">
+                        <label className="form-label">Consultation Fees (₹) *</label>
+                        <input type="number" className="form-control" name="Consultation_fees" 
+                          value={formData.Consultation_fees} onChange={handleChange} 
+                          min="0" step="0.01" required />
                       </div>
 
                       <div className="col-md-6 mb-3">
                         <label className="form-label">Department *</label>
-                        <select
-                          className="form-select"
-                          name="Department"
-                          value={formData.Department}
-                          onChange={handleChange}
-                          required={formData.Role === "Doctor"}
-                        >
+                        <select className="form-select" name="Department" 
+                          value={formData.Department} onChange={handleChange} 
+                          required={formData.Role === "Doctor"}>
                           <option value="">Select Department</option>
                           {departments.map(dept => (
-                            <option key={dept.DEPT_ID} value={dept.DEPT_ID}>
-                              {dept.Department_Name}
+                            <option key={dept.DEPT_ID || dept.id} value={dept.DEPT_ID || dept.id}>
+                              {dept.Department_Name || dept.name}
                             </option>
                           ))}
                         </select>
-                        <div className="form-text">Doctors must be assigned to a department</div>
-                      </div>
-
-                      <div className="col-md-6 mb-3">
-                        <label className="form-label">Consultation Fees (₹) *</label>
-                        <input
-                          type="number"
-                          className="form-control"
-                          name="Consultation_fees"
-                          value={formData.Consultation_fees}
-                          onChange={handleChange}
-                          min="0"
-                          step="0.01"
-                          required={formData.Role === "Doctor"}
-                          placeholder="Enter consultation fees"
-                        />
-                        <div className="form-text">Must be greater than 0 for doctors</div>
                       </div>
                     </>
                   )}
+                </div>
+              </div>
+            </div>
+          </div>
 
-                  {/* Form Actions */}
-                  <div className="col-12 mt-4 pt-3 border-top">
-                    <div className="d-flex justify-content-end gap-2">
-                      <Link to="/admin/staff" className="btn btn-outline-secondary">
-                        Cancel
-                      </Link>
-                      <button 
-                        type="submit" 
-                        className="btn btn-primary"
-                        disabled={loading}
-                      >
-                        {loading ? (
-                          <>
-                            <span className="spinner-border spinner-border-sm me-2"></span>
-                            Adding...
-                          </>
-                        ) : (
-                          <>
-                            <i className="bi bi-check-circle me-2"></i>
-                            Add Staff Member
-                          </>
-                        )}
-                      </button>
-                    </div>
+          {/* ============= EMPLOYMENT DETAILS ============= */}
+          <div className="col-12">
+            <div className="card shadow-sm border-0 mb-4">
+              <div className="card-header bg-light">
+                <h5 className="mb-0">
+                  <i className="bi bi-calendar-check me-2"></i>
+                  Employment Details
+                </h5>
+              </div>
+              <div className="card-body">
+                <div className="row">
+                  <div className="col-md-4 mb-3">
+                    <label className="form-label">Joining Date *</label>
+                    <input 
+                      type="date" 
+                      className="form-control" 
+                      name="Joining_Date" 
+                      value={formData.Joining_Date} 
+                      onChange={handleChange} 
+                      min={new Date().toISOString().split('T')[0]} // Cannot select past dates
+                      required 
+                    />
+                    <small className="text-muted">Cannot be in the past</small>
+                  </div>
+
+                  <div className="col-md-4 mb-3">
+                    <label className="form-label">Shift Timing</label>
+                    <select className="form-select" name="Shift_Timing" 
+                      value={formData.Shift_Timing} onChange={handleChange}>
+                      {shiftOptions.map(option => (
+                        <option key={option} value={option}>{option}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="col-md-4 mb-3">
+                    <label className="form-label">Salary (₹)</label>
+                    <input type="number" className="form-control" name="Salary" 
+                      value={formData.Salary} onChange={handleChange} min="0" step="0.01" />
                   </div>
                 </div>
-              </form>
-            </div>
-          </div>
-        </div>
-
-        <div className="col-12 col-lg-4">
-          <div className="card shadow-sm border-0">
-            <div className="card-body">
-              <h5 className="card-title">
-                <i className="bi bi-info-circle me-2"></i>
-                Guidelines
-              </h5>
-              <ul className="list-unstyled small">
-                <li className="mb-2">
-                  <i className="bi bi-check-circle text-success me-2"></i>
-                  All fields marked with * are required
-                </li>
-                <li className="mb-2">
-                  <i className="bi bi-check-circle text-success me-2"></i>
-                  Doctors require department and consultation fees
-                </li>
-                <li className="mb-2">
-                  <i className="bi bi-check-circle text-success me-2"></i>
-                  Phone number must be exactly 10 digits
-                </li>
-                <li className="mb-2">
-                  <i className="bi bi-check-circle text-success me-2"></i>
-                  Email must be valid and have proper domain
-                </li>
-                <li className="mb-2">
-                  <i className="bi bi-check-circle text-success me-2"></i>
-                  Age must be between 18-70 years
-                </li>
-                <li className="mb-2">
-                  <i className="bi bi-check-circle text-success me-2"></i>
-                  User account can be created after staff is added
-                </li>
-              </ul>
+              </div>
             </div>
           </div>
 
-          <div className="card shadow-sm border-0 mt-3">
-            <div className="card-body">
-              <h5 className="card-title">
-                <i className="bi bi-lightbulb me-2"></i>
-                Quick Tips
-              </h5>
-              <div className="alert alert-info mb-0">
-                <small>
-                  <i className="bi bi-exclamation-circle me-1"></i>
-                  After adding a staff member, you can create their user account from the staff list.
-                </small>
+          {/* ============= BANK DETAILS ============= */}
+          <div className="col-12">
+            <div className="card shadow-sm border-0 mb-4">
+              <div className="card-header bg-light">
+                <h5 className="mb-0">
+                  <i className="bi bi-bank me-2"></i>
+                  Bank Details
+                </h5>
+              </div>
+              <div className="card-body">
+                <div className="row">
+                  <div className="col-md-6 mb-3">
+                    <label className="form-label">Bank Name</label>
+                    <input type="text" className="form-control" name="Bank_Name" 
+                      value={formData.Bank_Name} onChange={handleChange} />
+                  </div>
+
+                  <div className="col-md-6 mb-3">
+                    <label className="form-label">Account Number</label>
+                    <input type="text" className="form-control" name="Account_Number" 
+                      value={formData.Account_Number} onChange={handleChange} 
+                      pattern="\d{9,18}" title="9-18 digit account number" />
+                  </div>
+
+                  <div className="col-md-6 mb-3">
+                    <label className="form-label">IFSC Code</label>
+                    <input type="text" className="form-control" name="IFSC_Code" 
+                      value={formData.IFSC_Code} onChange={handleChange} 
+                      pattern="[A-Z]{4}0[A-Z0-9]{6}" title="Format: ABCD0123456" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ============= ADDITIONAL INFO ============= */}
+          <div className="col-12">
+            <div className="card shadow-sm border-0 mb-4">
+              <div className="card-header bg-light">
+                <h5 className="mb-0">
+                  <i className="bi bi-sticky me-2"></i>
+                  Additional Information
+                </h5>
+              </div>
+              <div className="card-body">
+                <div className="row">
+                  <div className="col-12 mb-3">
+                    <label className="form-label">Notes</label>
+                    <textarea className="form-control" name="Notes" rows="4" 
+                      value={formData.Notes} onChange={handleChange} 
+                      placeholder="Any additional notes or remarks..." />
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
+
+        {/* ============= FORM ACTIONS ============= */}
+        <div className="d-flex justify-content-between align-items-center mt-4 pt-3 border-top">
+          <Link to="/admin/staff" className="btn btn-outline-secondary">
+            <i className="bi bi-x-circle me-1"></i>Cancel
+          </Link>
+          <button type="submit" className="btn btn-primary px-4" disabled={loading}>
+            {loading ? (
+              <>
+                <span className="spinner-border spinner-border-sm me-2"></span>
+                Adding Staff...
+              </>
+            ) : (
+              <>
+                <i className="bi bi-check-circle me-2"></i>
+                Add Staff Member
+              </>
+            )}
+          </button>
+        </div>
+      </form>
     </div>
   );
 };

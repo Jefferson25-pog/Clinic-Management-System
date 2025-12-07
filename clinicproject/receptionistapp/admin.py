@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import PatientDetail, AppointmentDetail, ReceptionistLog, BillDetail
+from .models import PatientDetail, AppointmentDetail, BillDetail
 
 @admin.register(PatientDetail)
 class PatientDetailsAdmin(admin.ModelAdmin):
@@ -23,12 +23,6 @@ class AppointmentDetailsAdmin(admin.ModelAdmin):
             return obj.DOC_ID.Name
         return "No Doctor"
     doctor_name.short_description = 'Doctor'
-
-@admin.register(ReceptionistLog)
-class ReceptionistLogAdmin(admin.ModelAdmin):
-    list_display = ['LOG_ID', 'Action', 'Timestamp']
-    list_filter = ['Timestamp']
-    search_fields = ['Action', 'Details']
 
 @admin.register(BillDetail)
 class BillDetailsAdmin(admin.ModelAdmin):

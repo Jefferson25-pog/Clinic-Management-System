@@ -1,151 +1,146 @@
-// src/modules/admin/services/adminApi.js - UPDATED
+// src/modules/admin/services/adminApi.js - SIMPLIFIED
 import axiosInstance from "../../../api/axiosInstance.js";
 
 export const adminApi = {
   // ============= Staff CRUD Operations =============
   getStaff: (params = {}) => 
-    axiosInstance.get("/admin/staffs/", { params }),
+    axiosInstance.get("/api/admin/staffs/", { params }),
   
   getStaffById: (id) => 
-    axiosInstance.get(`/admin/staffs/${id}/`),
+    axiosInstance.get(`/api/admin/staffs/${id}/`),
   
   createStaff: (data) => 
-    axiosInstance.post("/admin/staffs/", data),
+    axiosInstance.post("/api/admin/staffs/", data),
   
   updateStaff: (id, data) => 
-    axiosInstance.put(`/admin/staffs/${id}/`, data),
+    axiosInstance.put(`/api/admin/staffs/${id}/`, data),
   
   deleteStaff: (id) => 
-    axiosInstance.delete(`/admin/staffs/${id}/`),
+    axiosInstance.delete(`/api/admin/staffs/${id}/`),
   
   // ============= Staff Account Management =============
   activateStaffAccount: (staffId) => 
-    axiosInstance.post(`/admin/staffs/${staffId}/activate_account/`),
+    axiosInstance.post(`/api/admin/staffs/${staffId}/activate_account/`),
   
   deactivateStaffAccount: (staffId) => 
-    axiosInstance.post(`/admin/staffs/${staffId}/deactivate_account/`),
+    axiosInstance.post(`/api/admin/staffs/${staffId}/deactivate_account/`),
   
   checkStaffAccount: (staffId) =>
-    axiosInstance.get(`/admin/staffs/${staffId}/check_account/`),
+    axiosInstance.get(`/api/admin/staffs/${staffId}/check_account/`),
 
   // ============= Account Linking =============
   linkStaffToUser: (staffId, userId) => 
-    axiosInstance.post(`/admin/staffs/${staffId}/link_to_user/`, { 
+    axiosInstance.post(`/api/admin/staffs/${staffId}/link_to_user/`, {
       user_id: userId 
     }),
   
   unlinkStaffAccount: (staffId) => 
-    axiosInstance.post(`/admin/staffs/${staffId}/unlink_account/`),
+    axiosInstance.post(`/api/admin/staffs/${staffId}/unlink_account/`),
   
-  // ============= PASSWORD MANAGEMENT - USE AUTH ENDPOINTS =============
+  // ============= PASSWORD MANAGEMENT =============
   resetUserPassword: (staffId, newPassword) => 
-    axiosInstance.post(`/auth/staff/${staffId}/reset-password/`, { 
+    axiosInstance.post(`/api/auth/staff/${staffId}/reset-password/`, {
       new_password: newPassword 
     }),
   
-  // Create user account for staff (using authentication endpoint)
-  createUserAccount: (data) => 
-    axiosInstance.post("/auth/users/create/", data),
+  // Create user account (STANDALONE - not linked to staff)
+  createUser: (data) => 
+    axiosInstance.post("/api/auth/users/create/", data),
   
-  // Legacy functions - KEEP FOR COMPATIBILITY
-  setStaffPassword: (staffId, newPassword) => 
-    axiosInstance.post(`/admin/staffs/${staffId}/set_custom_password/`, { 
-      new_password: newPassword 
-    }),
-  
+  // Create user account FOR STAFF (linked to staff member)
   createStaffUserAccount: (staffId, accountData) =>
-    axiosInstance.post(`/admin/staffs/${staffId}/create_user_account/`, accountData),
+    axiosInstance.post(`/api/admin/staffs/${staffId}/create_user_account/`, accountData),
 
   // ============= Department Management =============
   getDepartments: (params = {}) => 
-    axiosInstance.get("/admin/departments/", { params }),
+    axiosInstance.get("/api/admin/departments/", { params }),
   
   getDepartmentById: (id) => 
-    axiosInstance.get(`/admin/departments/${id}/`),
+    axiosInstance.get(`/api/admin/departments/${id}/`),
   
   createDepartment: (data) => 
-    axiosInstance.post("/admin/departments/", data),
+    axiosInstance.post("/api/admin/departments/", data),
   
   updateDepartment: (id, data) => 
-    axiosInstance.put(`/admin/departments/${id}/`, data),
+    axiosInstance.put(`/api/admin/departments/${id}/`, data),
   
   deleteDepartment: (id) => 
-    axiosInstance.delete(`/admin/departments/${id}/`),
+    axiosInstance.delete(`/api/admin/departments/${id}/`),
 
   // ============= Groups/Roles =============
   getGroups: () => 
-    axiosInstance.get("/admin/groups/"),
+    axiosInstance.get("/api/admin/groups/"),
   
   createGroup: (data) => 
-    axiosInstance.post("/admin/groups/", data),
+    axiosInstance.post("/api/admin/groups/", data),
   
   updateGroup: (id, data) => 
-    axiosInstance.put(`/admin/groups/${id}/`, data),
+    axiosInstance.put(`/api/admin/groups/${id}/`, data),
   
   deleteGroup: (id) => 
-    axiosInstance.delete(`/admin/groups/${id}/`),
+    axiosInstance.delete(`/api/admin/groups/${id}/`),
 
   // ============= User Management =============
   getUsers: (params = {}) => 
-    axiosInstance.get("/auth/users/", { params }),
+    axiosInstance.get("/api/auth/users/", { params }),
   
   getAvailableUsers: () => 
-    axiosInstance.get("/auth/users/unlinked/"),
-  
-  createUser: (data) => 
-    axiosInstance.post("/auth/users/create/", data),
+    axiosInstance.get("/api/auth/users/unlinked/"),
   
   updateUser: (id, data) => 
-    axiosInstance.put(`/auth/users/${id}/`, data),
+    axiosInstance.put(`/api/auth/users/${id}/`, data),
   
   deleteUser: (id) => 
-    axiosInstance.delete(`/auth/users/${id}/delete/`),
+    axiosInstance.delete(`/api/auth/users/${id}/delete/`),
   
   resetUserPasswordById: (userId, data) => 
-    axiosInstance.post(`/auth/users/${userId}/reset-password/`, data),
+    axiosInstance.post(`/api/auth/users/${userId}/reset-password/`, data),
+
+  syncUserRole: (userId) =>
+    axiosInstance.post(`/api/auth/users/${userId}/sync-role/`),
   
   // ============= System Logs =============
   getSystemLogs: (params = {}) =>
-    axiosInstance.get("/auth/system-logs/", { params }),
+    axiosInstance.get("/api/auth/system-logs/", { params }),
   
   getActivityMonitor: () =>
-    axiosInstance.get("/auth/activity-monitor/"),
+    axiosInstance.get("/api/auth/activity-monitor/"),
   
   getDashboardStats: () =>
-    axiosInstance.get("/auth/dashboard-stats/"),
+    axiosInstance.get("/api/auth/dashboard-stats/"),
   
   // ============= Login History =============
   getLoginHistory: (params = {}) =>
-    axiosInstance.get("/auth/login-history/", { params }),
+    axiosInstance.get("/api/auth/login-history/", { params }),
 
   forceLogout: (loginId) =>
-    axiosInstance.post(`/auth/login-history/${loginId}/force-logout/`),
+    axiosInstance.post(`/api/auth/login-history/${loginId}/force-logout/`),
 };
 
 export const authApi = {
   // ============= Authentication =============
   login: (data) => 
-    axiosInstance.post("/auth/token/", data),
+    axiosInstance.post("/api/auth/token/", data),
   
   refreshToken: (refreshToken) => 
-    axiosInstance.post("/auth/token/refresh/", { refresh: refreshToken }),
+    axiosInstance.post("/api/auth/token/refresh/", { refresh: refreshToken }),
   
   logout: () =>
-    axiosInstance.post("/auth/logout/"),
+    axiosInstance.post("/api/auth/logout/"),
   
   verifyToken: () =>
-    axiosInstance.post("/auth/token/verify/"),
+    axiosInstance.post("/api/auth/token/verify/"),
   
   // ============= User Profile =============
   getProfile: () => 
-    axiosInstance.get("/auth/profile/"),
+    axiosInstance.get("/api/auth/profile/"),
   
   updateProfile: (data) => 
-    axiosInstance.put("/auth/profile/", data),
+    axiosInstance.put("/api/auth/profile/", data),
   
   // ============= Password Management =============
   changePassword: (data) => 
-    axiosInstance.post("/auth/change-password/", data),
+    axiosInstance.post("/api/auth/change-password/", data),
 };
 
 export default adminApi;

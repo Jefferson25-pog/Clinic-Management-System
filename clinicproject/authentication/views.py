@@ -25,6 +25,33 @@ from .serializers import (
 from .models import LoginHistory, UserProfile, SystemLog, ActivityMonitor
 from rest_framework_simplejwt.views import TokenObtainPairView
 
+# authentication/views.py - ADD THIS FUNCTION AT THE TOP OF THE FILE (after imports)
+def sync_user_role_to_staff(user):
+    """Sync user's groups to match their staff role"""
+    if hasattr(user, 'profile') and user.profile.staff_detail:
+        staff = user.profile.staff_detail
+        staff_role = staff.Role
+        
+        # Clear existing groups
+        user.groups.clear()
+        
+        # Add group matching staff role
+        group, created = Group.objects.get_or_create(name=staff_role)
+        user.groups.add(group)
+        
+        # Update staff flags if needed
+        if staff_role in ['Admin', 'Super Admin']:
+            user.is_staff = True
+            if staff_role == 'Super Admin':
+                user.is_superuser = True
+        else:
+            user.is_staff = False
+            user.is_superuser = False
+        
+        user.save()
+        return True
+    return False
+
 logger = logging.getLogger(__name__)
 
 class CustomTokenObtainPairView(TokenObtainPairView):
@@ -63,6 +90,7 @@ class AdminLoginView(APIView):
                 'success': True,
                 'message': 'Admin login successful',
                 'user': user_serializer.data,
+                'redirect_path': '/admin',  # ADD THIS
                 'tokens': {
                     'refresh': serializer.validated_data['refresh'],
                     'access': serializer.validated_data['access']
@@ -85,13 +113,68 @@ class AdminLoginView(APIView):
             'errors': serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
 
+# authentication/views.py - UPDATE StaffLoginView with better error handling
 class StaffLoginView(APIView):
     permission_classes = [AllowAny]
     
     def post(self, request):
-        serializer = StaffLoginSerializer(data=request.data, context={'request': request})
-        if serializer.is_valid():
+        try:
+            serializer = StaffLoginSerializer(data=request.data, context={'request': request})
+            
+            if not serializer.is_valid():
+                # Log failed login attempt
+                username = request.data.get('username', 'unknown')
+                LoginHistory.objects.create(
+                    username=username,
+                    login_type='STAFF',
+                    ip_address=request.META.get('REMOTE_ADDR'),
+                    user_agent=request.META.get('HTTP_USER_AGENT', ''),
+                    success=False,
+                    details={'error': 'Validation failed', 'errors': serializer.errors}
+                )
+                
+                return Response({
+                    'success': False,
+                    'errors': serializer.errors
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Extract data from serializer
             user = serializer.validated_data['user']
+            staff = serializer.validated_data['staff_detail']
+            
+            # CRITICAL: Add validation for staff role
+            if not hasattr(staff, 'Role') or not staff.Role:
+                raise ValidationError('Staff role is not defined')
+            
+            # Try to sync groups with better error handling
+            try:
+                from django.contrib.auth.models import Group
+                
+                # Clear existing groups
+                user.groups.clear()
+                
+                # Add group matching staff role
+                if staff.Role:
+                    group, created = Group.objects.get_or_create(name=staff.Role)
+                    user.groups.add(group)
+                
+                # Update staff/admin flags
+                if staff.Role in ['Admin', 'Super Admin']:
+                    user.is_staff = True
+                    if staff.Role == 'Super Admin':
+                        user.is_superuser = True
+                else:
+                    # Staff users should not have admin flags
+                    user.is_staff = False
+                    user.is_superuser = False
+                
+                user.save()
+                
+            except Exception as e:
+                # Log group sync error but continue
+                logger.warning(f"Group sync failed for {user.username}: {str(e)}")
+                # Don't raise error - allow login to proceed
+            
             user_serializer = UserSerializer(user)
             
             # Update last activity
@@ -109,35 +192,51 @@ class StaffLoginView(APIView):
                 success=True,
                 details={
                     'user_id': user.id,
-                    'username': user.username
+                    'staff_id': staff.STAFF_ID,
+                    'staff_role': staff.Role,
+                    'staff_name': staff.Name
                 }
             )
             
+            # Determine redirect path based on role
+            redirect_path = self._get_redirect_path(staff.Role)
+            
             return Response({
                 'success': True,
-                'message': 'Staff login successful',
+                'message': f'{staff.Role} login successful',
                 'user': user_serializer.data,
+                'staff': {
+                    'id': staff.STAFF_ID,
+                    'name': staff.Name,
+                    'role': staff.Role
+                },
+                'redirect_path': redirect_path,
                 'tokens': {
                     'refresh': serializer.validated_data['refresh'],
                     'access': serializer.validated_data['access']
                 }
             })
-        
-        # Log failed login attempt
-        username = request.data.get('username', 'unknown')
-        LoginHistory.objects.create(
-            username=username,
-            login_type='STAFF',
-            ip_address=request.META.get('REMOTE_ADDR'),
-            user_agent=request.META.get('HTTP_USER_AGENT', ''),
-            success=False,
-            details={'error': 'Invalid credentials'}
-        )
-        
-        return Response({
-            'success': False,
-            'errors': serializer.errors
-        }, status=status.HTTP_400_BAD_REQUEST)
+            
+        except Exception as e:
+            # Log the actual error for debugging
+            logger.error(f"Staff login error: {str(e)}", exc_info=True)
+            
+            # Return a proper JSON error response
+            return Response({
+                'success': False,
+                'error': 'Login failed due to server error',
+                'detail': str(e) if settings.DEBUG else 'Internal server error'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def _get_redirect_path(self, role):
+        """Get the appropriate redirect path based on role"""
+        role_paths = {
+            'Doctor': '/doctor',
+            'Receptionist': '/reception',
+            'Pharmacist': '/pharmacy',
+            'Lab Technician': '/lab'
+        }
+        return role_paths.get(role, '/')
 
 class AuthCheckView(APIView):
     permission_classes = [IsAuthenticated]
@@ -244,7 +343,7 @@ class UserCreateView(APIView):
                 role = request.data.get('role', 'User')
                 if role:
                     try:
-                        group = Group.objects.get(name=role)
+                        group, created = Group.objects.get_or_create(name=role)
                         user.groups.add(group)
                         
                         # If role is Admin, set staff flag
@@ -542,12 +641,12 @@ class ActivityMonitorView(APIView):
             'total_activities': ActivityMonitor.objects.count()
         })
 
+# authentication/views.py - UPDATE DashboardStatsView class
 class DashboardStatsView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
-        from django.contrib.auth.models import User
-        from adminapp.models import StaffDetail
+        from django.contrib.auth.models import User, Group
         
         stats = {}
         user_role = 'User'
@@ -560,19 +659,55 @@ class DashboardStatsView(APIView):
             user_role = request.user.profile.staff_detail.Role
         
         if request.user.is_staff or request.user.is_superuser:
-            stats.update({
-                'total_users': User.objects.count(),
-                'total_staff': StaffDetail.objects.count(),
-                'active_staff': StaffDetail.objects.filter(Status='Available').count(),
-                'doctors_count': StaffDetail.objects.filter(Role='Doctor').count(),
-                'admins_count': StaffDetail.objects.filter(Role='Admin').count(),
-                'total_groups': Group.objects.count(),
-                'today_logins': SystemLog.objects.filter(
-                    log_type='AUTH', 
-                    action__contains='login',
-                    timestamp__date=timezone.now().date()
-                ).count(),
-            })
+            # Use string imports to avoid circular imports
+            try:
+                # Import Department using string path
+                from adminapp.models import Department
+                
+                stats.update({
+                    'total_users': User.objects.count(),
+                    'total_groups': Group.objects.count(),
+                    'today_logins': LoginHistory.objects.filter(
+                        success=True,
+                        timestamp__date=timezone.now().date()
+                    ).count(),
+                    'total_departments': Department.objects.count(),  # ADD THIS
+                    'departments_with_staff': Department.objects.filter(
+                        staff_details__isnull=False
+                    ).distinct().count() if hasattr(Department, 'staff_details') else 0,
+                })
+                
+                # Try to get staff stats if models exist
+                try:
+                    from adminapp.models import StaffDetail
+                    stats.update({
+                        'total_staff': StaffDetail.objects.count(),
+                        'active_staff': StaffDetail.objects.filter(Status='Available').count(),
+                        'doctors_count': StaffDetail.objects.filter(Role='Doctor').count(),
+                        'admins_count': StaffDetail.objects.filter(Role='Admin').count(),
+                    })
+                except Exception as e:
+                    logger.warning(f"Could not load staff stats: {e}")
+                    stats.update({
+                        'total_staff': 0,
+                        'active_staff': 0,
+                        'doctors_count': 0,
+                        'admins_count': 0,
+                    })
+                    
+            except ImportError as e:
+                logger.error(f"DashboardStatsView import error: {e}")
+                stats.update({
+                    'total_users': User.objects.count(),
+                    'total_groups': Group.objects.count(),
+                    'today_logins': 0,
+                    'total_departments': 0,
+                    'departments_with_staff': 0,
+                    'total_staff': 0,
+                    'active_staff': 0,
+                    'doctors_count': 0,
+                    'admins_count': 0,
+                })
         
         if hasattr(request.user, 'profile') and request.user.profile.staff_detail:
             staff = request.user.profile.staff_detail
@@ -702,6 +837,17 @@ class LoginHistoryView(APIView):
             
             logs_data = []
             for log in paginated_logs:
+                # Handle logout timestamp for failed logins
+                logout_time = None
+                logout_display = "N/A"
+                if log.success and log.logout_timestamp:
+                    logout_time = log.logout_timestamp.isoformat()
+                    logout_display = log.logout_timestamp.strftime('%Y-%m-%d %H:%M:%S')
+                elif not log.success:
+                    logout_display = "N/A"
+                elif log.success and not log.logout_timestamp:
+                    logout_display = "Still active"
+                
                 logs_data.append({
                     'id': log.id,
                     'username': log.username or '',
@@ -711,10 +857,12 @@ class LoginHistoryView(APIView):
                     'user_agent': log.user_agent or '',
                     'success': log.success,
                     'timestamp': log.timestamp.isoformat() if log.timestamp else '',
-                    'logout_timestamp': log.logout_timestamp.isoformat() if log.logout_timestamp else '',
+                    'logout_timestamp': logout_time,
+                    'logout_timestamp_display': logout_display,
                     'session_duration': log.session_duration,
                     'session_duration_display': log.get_session_duration_display(),
                     'user': log.user.username if log.user and hasattr(log.user, 'username') else None,
+                    'user_id': log.user.id if log.user else None,
                     'details': log.details or {},
                     'is_active': log.success and not log.logout_timestamp
                 })
@@ -727,10 +875,12 @@ class LoginHistoryView(APIView):
                 logout_timestamp__isnull=True
             ).count()
             
-            avg_duration_result = LoginHistory.objects.filter(
+            # Calculate average duration only for successful logins with logout
+            successful_logins_with_logout = LoginHistory.objects.filter(
                 success=True, 
-                session_duration__isnull=False
-            ).aggregate(Avg('session_duration'))
+                logout_timestamp__isnull=False
+            )
+            avg_duration_result = successful_logins_with_logout.aggregate(Avg('session_duration'))
             
             stats = {
                 'total_logins': total,
@@ -895,3 +1045,192 @@ class StaffPasswordResetView(APIView):
                 'email': staff.Email
             }
         })
+    
+
+# authentication/views.py - ADD THESE NEW VIEWS
+
+class UserBulkDeleteView(APIView):
+    """Bulk delete users"""
+    permission_classes = [permissions.IsAdminUser]
+    
+    def post(self, request):
+        user_ids = request.data.get('user_ids', [])
+        
+        if not user_ids:
+            return Response({
+                'success': False,
+                'error': 'No user IDs provided'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        deleted_users = []
+        failed_deletions = []
+        
+        for user_id in user_ids:
+            try:
+                user = User.objects.get(id=user_id)
+                
+                # Prevent deleting superuser unless by superuser
+                if user.is_superuser and not request.user.is_superuser:
+                    failed_deletions.append({
+                        'id': user_id,
+                        'username': user.username,
+                        'error': 'Cannot delete superuser account'
+                    })
+                    continue
+                
+                username = user.username
+                
+                # Unlink staff if exists
+                try:
+                    if hasattr(user, 'profile') and user.profile.staff_detail:
+                        staff = user.profile.staff_detail
+                        staff.user = None
+                        staff.account_active = False
+                        staff.save()
+                except:
+                    pass
+                
+                user.delete()
+                deleted_users.append({'id': user_id, 'username': username})
+                
+                # Log the action
+                SystemLog.objects.create(
+                    level='WARNING',
+                    log_type='USER',
+                    user=request.user,
+                    ip_address=request.META.get('REMOTE_ADDR'),
+                    action=f'User deleted: {username}',
+                    details={'deleted_user_id': user_id}
+                )
+                
+            except User.DoesNotExist:
+                failed_deletions.append({
+                    'id': user_id,
+                    'error': 'User not found'
+                })
+            except Exception as e:
+                failed_deletions.append({
+                    'id': user_id,
+                    'error': str(e)
+                })
+        
+        return Response({
+            'success': True,
+            'message': f'Deleted {len(deleted_users)} users',
+            'deleted': deleted_users,
+            'failed': failed_deletions
+        })
+
+class EndSessionView(APIView):
+    """Manually end session when user goes back to login page"""
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        user = request.user
+        
+        try:
+            # Find and mark logout for all active sessions
+            active_logins = LoginHistory.objects.filter(
+                user=user,
+                success=True,
+                logout_timestamp__isnull=True
+            )
+            
+            ended_sessions = []
+            for login in active_logins:
+                login.mark_logout()
+                ended_sessions.append({
+                    'login_id': login.id,
+                    'login_time': login.timestamp,
+                    'logout_time': login.logout_timestamp
+                })
+            
+            # Log system log
+            SystemLog.objects.create(
+                level='INFO',
+                log_type='AUTH',
+                user=user,
+                ip_address=request.META.get('REMOTE_ADDR'),
+                action='User ended session manually',
+                details={
+                    'username': user.username,
+                    'ended_sessions': len(ended_sessions)
+                }
+            )
+            
+            return Response({
+                'success': True,
+                'message': f'Ended {len(ended_sessions)} active sessions',
+                'ended_sessions': ended_sessions
+            })
+                
+        except Exception as e:
+            logger.error(f"Error ending session for user {user.username}: {str(e)}")
+            return Response({
+                'success': False,
+                'error': str(e) if settings.DEBUG else 'Failed to end session'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+class ListAllAuthUrls(APIView):
+    permission_classes = [AllowAny]
+    
+    def get(self, request):
+        from django.urls import get_resolver, reverse
+        
+        resolver = get_resolver()
+        url_patterns = []
+        
+        def extract_urls(patterns, prefix=''):
+            for pattern in patterns:
+                if hasattr(pattern, 'url_patterns'):
+                    # This is an include
+                    extract_urls(pattern.url_patterns, prefix + str(pattern.pattern))
+                else:
+                    # This is a regular pattern
+                    try:
+                        full_pattern = prefix + str(pattern.pattern)
+                        url_patterns.append({
+                            'pattern': full_pattern,
+                            'name': pattern.name if hasattr(pattern, 'name') else None
+                        })
+                    except:
+                        pass
+        
+        extract_urls(resolver.url_patterns)
+        
+        return Response({
+            'all_urls': url_patterns,
+            'test_urls': [
+                '/api/auth/check-auth/',
+                '/api/auth/admin-login/',
+                '/api/auth/staff-login/',
+            ]
+        })
+    
+# authentication/views.py - ADD THIS VIEW (add to the bottom of the file)
+class SyncUserRoleView(APIView):
+    """Sync user's group role to match their staff role"""
+    permission_classes = [permissions.IsAdminUser]
+    
+    def post(self, request, user_id):
+        try:
+            user = User.objects.get(id=user_id)
+            synced = sync_user_role_to_staff(user)
+            
+            if synced:
+                return Response({
+                    'success': True,
+                    'message': f'User {user.username} role synced to staff role',
+                    'user': UserSerializer(user).data
+                })
+            else:
+                return Response({
+                    'success': False,
+                    'error': 'User does not have a staff profile'
+                }, status=status.HTTP_400_BAD_REQUEST)
+                
+        except User.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': 'User not found'
+            }, status=status.HTTP_404_NOT_FOUND)

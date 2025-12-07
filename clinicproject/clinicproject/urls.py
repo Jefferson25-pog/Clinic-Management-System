@@ -10,7 +10,7 @@ urlpatterns = [
     # App URLs
     path('api/admin/', include('adminapp.urls')),
     path('api/doctor/', include('doctorapp.urls')),
-    path('api/receptionist/', include('receptionistapp.urls')),
-    path('api/lab/', include('labtechapp.urls')),
-    path('api/pharmacy/', include('pharmacistapp.urls')),
+    path('api/reception/', include('receptionistapp.urls')),
+    path('api/labtech/', include('labtechapp.urls')),
+    path('api/pharmacist/', include('pharmacistapp.urls')),
 ]

@@ -1,11 +1,10 @@
-// src/context/AuthContext.jsx - COMPLETE FIXED VERSION
+// src/context/AuthContext.jsx - UPDATED WITH CORRECT API ENDPOINTS
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import axiosInstance from '../api/axiosInstance.js';
 
 // Create context
 const AuthContext = createContext(null);
 
-// Custom hook to use auth context
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
@@ -14,15 +13,26 @@ export const useAuth = () => {
   return context;
 };
 
-// Check if running in browser
 const isBrowser = typeof window !== 'undefined';
 
-const allowedStaffRoles = [
-  'Doctor',
-  'Receptionist',
-  'Pharmacist',
-  'Lab Technician',
-];
+// Role to dashboard mapping
+const ROLE_DASHBOARD_PATHS = {
+  'Super Admin': '/admin',
+  'Admin': '/admin',
+  'Doctor': '/doctor',
+  'Receptionist': '/reception',
+  'Pharmacist': '/pharmacy',
+  'Lab Technician': '/lab',
+  'User': '/'
+};
+
+// Frontend role to backend role mapping
+const FRONTEND_TO_BACKEND_ROLE = {
+  'doctor': 'Doctor',
+  'reception': 'Receptionist',
+  'pharmacy': 'Pharmacist',
+  'lab': 'Lab Technician'
+};
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
@@ -30,7 +40,7 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [initialized, setInitialized] = useState(false);
 
-  // Safe localStorage functions
+  // Storage functions
   const getFromStorage = useCallback((key) => {
     if (!isBrowser) return null;
     try {
@@ -53,7 +63,10 @@ export const AuthProvider = ({ children }) => {
   const clearStorage = useCallback(() => {
     if (!isBrowser) return;
     try {
-      localStorage.clear();
+      localStorage.removeItem('access');
+      localStorage.removeItem('refresh');
+      localStorage.removeItem('user');
+      localStorage.removeItem('staff_detail');
     } catch (error) {
       console.warn('Failed to clear localStorage:', error);
     }
@@ -61,17 +74,35 @@ export const AuthProvider = ({ children }) => {
 
   // Get user role
   const getRole = useCallback(() => {
-    if (!user) return null;
-    
-    if (user.is_superuser) return 'Super Admin';
-    if (user.is_staff) return 'Admin';
-    if (staffDetail && staffDetail.Role) return staffDetail.Role;
-    if (user.profile?.is_admin_user) return 'Admin';
-    
-    return 'User';
-  }, [user, staffDetail]);
+  if (!user) return null;
+  
+  // Priority 1: Super Admin
+  if (user.is_superuser) return 'Super Admin';
+  
+  // Priority 2: Staff role from profile (MOST IMPORTANT)
+  if (staffDetail && staffDetail.Role) return staffDetail.Role;
+  
+  // Priority 3: Admin flag from profile
+  if (user.profile?.is_admin_user) return 'Admin';
+  
+  // Priority 4: Django staff flag
+  if (user.is_staff) return 'Staff';
+  
+  // Priority 5: User role from groups
+  if (user.groups && user.groups.length > 0) {
+    return user.groups[0].name;
+  }
+  
+  return 'User';
+}, [user, staffDetail]);
 
-  // Check authentication status
+  // Get dashboard path based on role
+  const getDashboardPath = useCallback(() => {
+    const role = getRole();
+    return ROLE_DASHBOARD_PATHS[role] || '/login';
+  }, [getRole]);
+
+  // Check authentication status - FIXED: Add /api/ prefix
   const checkAuth = useCallback(async () => {
     if (!isBrowser) {
       setLoading(false);
@@ -87,7 +118,7 @@ export const AuthProvider = ({ children }) => {
     }
 
     try {
-      const response = await axiosInstance.get('/auth/check-auth/');
+      const response = await axiosInstance.get('/api/auth/check-auth/'); // ADDED /api/
       
       if (response.data.authenticated) {
         setUser(response.data.user);
@@ -106,93 +137,173 @@ export const AuthProvider = ({ children }) => {
     }
   }, [getFromStorage]);
 
-  // Initialize auth on mount
+  // Initialize auth
   useEffect(() => {
     checkAuth();
   }, [checkAuth]);
 
-  // Admin login
+  // Admin login - FIXED: Add /api/ prefix
   const loginAdmin = useCallback(async (username, password) => {
     if (!isBrowser) throw new Error('Cannot login on server side');
 
-    const response = await axiosInstance.post('/auth/admin-login/', {
-      username,
-      password,
-    });
+    try {
+      const response = await axiosInstance.post('/api/auth/admin-login/', { // ADDED /api/
+        username,
+        password,
+      });
 
-    if (!response.data.success) {
-      throw new Error(response.data.message || 'Invalid admin credentials.');
+      if (!response.data.success) {
+        throw new Error(response.data.message || response.data.error || 'Invalid admin credentials.');
+      }
+
+      const { access, refresh } = response.data.tokens;
+      const userData = response.data.user;
+      
+      // Store data
+      setToStorage('access', access);
+      setToStorage('refresh', refresh);
+      setToStorage('user', JSON.stringify(userData));
+
+      setUser(userData);
+      setStaffDetail(null);
+
+      return {
+        success: true,
+        user: userData,
+        redirectPath: response.data.redirect_path || '/admin'
+      };
+    } catch (error) {
+      console.error('Admin login error:', error);
+      
+      let errorMessage = error.message;
+      if (error.response && error.response.data) {
+        const errorData = error.response.data;
+        if (errorData.error) {
+          errorMessage = errorData.error;
+        } else if (errorData.message) {
+          errorMessage = errorData.message;
+        } else if (errorData.errors) {
+          const firstError = Object.values(errorData.errors)[0];
+          errorMessage = firstError[0] || errorMessage;
+        }
+      }
+      
+      throw new Error(errorMessage);
     }
-
-    const { access, refresh } = response.data.tokens;
-    setToStorage('access', access);
-    setToStorage('refresh', refresh);
-
-    setUser(response.data.user);
-    setStaffDetail(null);
-
-    return response.data;
   }, [setToStorage]);
 
-  // Staff login
-  const loginStaff = useCallback(async (expectedRole, username, password) => {
+// In AuthContext.jsx - Update loginStaff function around line 258
+const loginStaff = useCallback(async (expectedRoleSlug, username, password) => {
     if (!isBrowser) throw new Error('Cannot login on server side');
 
-    const response = await axiosInstance.post('/auth/staff-login/', {
-      username,
-      password,
-    });
+    try {
+        const response = await axiosInstance.post('/api/auth/staff-login/', {
+            username,
+            password,
+        });
 
-    if (!response.data.success) {
-      throw new Error(response.data.message || 'Invalid staff credentials.');
+        if (!response.data.success) {
+            throw new Error(response.data.message || response.data.error || 'Invalid staff credentials.');
+        }
+
+        const { user: userData, staff, tokens, redirect_path } = response.data;
+        const expectedBackendRole = FRONTEND_TO_BACKEND_ROLE[expectedRoleSlug];
+
+        // Check if staff exists and has role
+        if (!staff || !staff.role) {
+            throw new Error('Staff information incomplete. Please contact administrator.');
+        }
+
+        // Check if user is admin (should not use staff portal)
+        if (userData.is_superuser || userData.is_staff) {
+            throw new Error('Admins cannot log in through the staff portal. Please use admin login.');
+        }
+
+        // Validate role for specific portal
+        if (expectedBackendRole && staff.role !== expectedBackendRole) {
+            throw new Error(`You are registered as ${staff.role}, not ${expectedBackendRole}. Please login from the correct portal.`);
+        }
+
+        // Validate staff account status
+        if (staff.Status && !['Available', 'Busy'].includes(staff.Status)) {
+            throw new Error('Your staff account is not active. Please contact administrator.');
+        }
+
+        // Validate account_active field
+        if (staff.account_active === false) {
+            throw new Error('Your account has been deactivated. Please contact administrator.');
+        }
+
+        // Validate user is active
+        if (!userData.is_active) {
+            throw new Error('Your user account is inactive. Please contact administrator.');
+        }
+
+        // Store data
+        setToStorage('access', tokens.access);
+        setToStorage('refresh', tokens.refresh);
+        setToStorage('user', JSON.stringify(userData));
+        setToStorage('staff_detail', JSON.stringify(staff));
+
+        setUser(userData);
+        setStaffDetail(staff);
+
+        return {
+            success: true,
+            user: userData,
+            staff: staff,
+            redirectPath: redirect_path || ROLE_DASHBOARD_PATHS[staff.role] || '/login'
+        };
+    } catch (error) {
+        console.error('Staff login error:', error);
+        
+        let errorMessage = error.message;
+        if (error.response && error.response.data) {
+            const errorData = error.response.data;
+            if (errorData.error) {
+                errorMessage = errorData.error;
+            } else if (errorData.message) {
+                errorMessage = errorData.message;
+            } else if (errorData.errors) {
+                // Handle Django serializer errors
+                if (typeof errorData.errors === 'object') {
+                    const firstError = Object.values(errorData.errors)[0];
+                    if (Array.isArray(firstError)) {
+                        errorMessage = firstError[0];
+                    } else {
+                        errorMessage = firstError;
+                    }
+                } else if (Array.isArray(errorData.errors)) {
+                    errorMessage = errorData.errors[0];
+                }
+            } else if (errorData.detail) {
+                errorMessage = errorData.detail;
+            }
+        }
+        
+        throw new Error(errorMessage);
     }
+}, [setToStorage]);
 
-    const { user: userData, staff_detail, tokens } = response.data;
-
-    // Role validation
-    if (userData.is_superuser || userData.is_staff) {
-      throw new Error('Admins cannot log in through the staff portal.');
-    }
-
-    if (!staff_detail) {
-      throw new Error('No staff profile found for this user.');
-    }
-
-    if (!allowedStaffRoles.includes(staff_detail.Role)) {
-      throw new Error('Your role does not have staff portal access.');
-    }
-
-    if (expectedRole && staff_detail.Role !== expectedRole) {
-      throw new Error(
-        `Only ${expectedRole} can log in here. You are a ${staff_detail.Role}.`
-      );
-    }
-
-    // Store tokens
-    setToStorage('access', tokens.access);
-    setToStorage('refresh', tokens.refresh);
-
-    setUser(userData);
-    setStaffDetail(staff_detail);
-
-    return response.data;
-  }, [setToStorage]);
-
-  // Logout
+  // Logout - FIXED: Add /api/ prefix
   const logout = useCallback(async () => {
     if (!isBrowser) return;
 
     try {
-      await axiosInstance.post('/auth/logout/');
+      await axiosInstance.post('/api/auth/logout/', {}, { // ADDED /api/
+        headers: {
+          'Authorization': `Bearer ${getFromStorage('access')}`
+        }
+      });
     } catch (error) {
       console.warn('Logout error:', error.message);
+    } finally {
+      clearStorage();
+      setUser(null);
+      setStaffDetail(null);
+      setInitialized(false);
     }
-
-    clearStorage();
-    setUser(null);
-    setStaffDetail(null);
-    setInitialized(false);
-  }, [clearStorage]);
+  }, [clearStorage, getFromStorage]);
 
   const value = {
     user,
@@ -203,7 +314,11 @@ export const AuthProvider = ({ children }) => {
     logout,
     checkAuth,
     getRole,
-    isAuthenticated: !!user,
+    getDashboardPath,
+    isAuthenticated: !!user && !!getFromStorage('access'),
+    isStaff: () => staffDetail && ['Doctor', 'Receptionist', 'Pharmacist', 'Lab Technician'].includes(staffDetail.Role),
+    isAdmin: () => user && (user.is_staff || user.is_superuser),
+    getStaffRole: () => staffDetail?.Role,
   };
 
   return (

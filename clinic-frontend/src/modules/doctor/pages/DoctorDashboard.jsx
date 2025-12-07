@@ -1,210 +1,80 @@
-import React from 'react';
-import { Row, Col, Card, Button } from 'react-bootstrap';
-import { Link } from 'react-router-dom';
-import {
-  Calendar,
-  Users,
-  FileText,
-  Activity,
-  Clock,
-  AlertCircle,
-  TrendingUp
-} from 'react-feather';
-import AvailabilityToggle from '../components/common/AvailabilityToggle';
+// src/modules/doctor/pages/DoctorDashboard.jsx
+import React from "react";
 
 const DoctorDashboard = () => {
   return (
     <div className="doctor-dashboard">
       <div className="d-flex justify-content-between align-items-center mb-4">
         <div>
-          <h2 className="mb-1">Doctor Dashboard</h2>
+          <h3 className="mb-1">Doctor Dashboard</h3>
           <p className="text-muted mb-0">
-            Welcome back, Dr. Smith • Cardiology Department
+            Welcome to the Doctor Portal - Under Construction
           </p>
         </div>
-        <AvailabilityToggle currentStatus="Available" />
+        <div className="btn-group">
+          <span className="badge bg-info">Role: Doctor</span>
+        </div>
       </div>
 
-      {/* Quick Stats */}
-      <Row className="g-3 mb-4">
-        <Col md={3} sm={6}>
-          <Card className="border-start border-primary border-3">
-            <Card.Body>
-              <div className="d-flex align-items-center">
-                <div className="bg-primary bg-opacity-10 p-2 rounded me-3">
-                  <Calendar className="text-primary" size={20} />
-                </div>
-                <div>
-                  <h4 className="mb-0">12</h4>
-                  <small className="text-muted">Today's Appointments</small>
-                </div>
+      <div className="row">
+        <div className="col-12">
+          <div className="card shadow-sm border-0">
+            <div className="card-body text-center py-5">
+              <div className="display-1 text-primary mb-3">
+                <i className="bi bi-stethoscope"></i>
               </div>
-            </Card.Body>
-          </Card>
-        </Col>
-        <Col md={3} sm={6}>
-          <Card className="border-start border-warning border-3">
-            <Card.Body>
-              <div className="d-flex align-items-center">
-                <div className="bg-warning bg-opacity-10 p-2 rounded me-3">
-                  <FileText className="text-warning" size={20} />
-                </div>
-                <div>
-                  <h4 className="mb-0">8</h4>
-                  <small className="text-muted">Pending Consultations</small>
-                </div>
-              </div>
-            </Card.Body>
-          </Card>
-        </Col>
-        <Col md={3} sm={6}>
-          <Card className="border-start border-success border-3">
-            <Card.Body>
-              <div className="d-flex align-items-center">
-                <div className="bg-success bg-opacity-10 p-2 rounded me-3">
-                  <Activity className="text-success" size={20} />
-                </div>
-                <div>
-                  <h4 className="mb-0">3</h4>
-                  <small className="text-muted">Lab Results Pending</small>
-                </div>
-              </div>
-            </Card.Body>
-          </Card>
-        </Col>
-        <Col md={3} sm={6}>
-          <Card className="border-start border-info border-3">
-            <Card.Body>
-              <div className="d-flex align-items-center">
-                <div className="bg-info bg-opacity-10 p-2 rounded me-3">
-                  <Users className="text-info" size={20} />
-                </div>
-                <div>
-                  <h4 className="mb-0">24</h4>
-                  <small className="text-muted">Weekly Patients</small>
-                </div>
-              </div>
-            </Card.Body>
-          </Card>
-        </Col>
-      </Row>
-
-      {/* Quick Actions */}
-      <Card className="mb-4">
-        <Card.Header className="bg-white">
-          <h5 className="mb-0">Quick Actions</h5>
-        </Card.Header>
-        <Card.Body>
-          <Row className="g-3">
-            <Col md={3} sm={6}>
-              <Button 
-                as={Link} 
-                to="/doctor/appointments"
-                variant="outline-primary" 
-                className="w-100 d-flex flex-column align-items-center py-3"
-              >
-                <Calendar size={24} className="mb-2" />
-                View Appointments
-              </Button>
-            </Col>
-            <Col md={3} sm={6}>
-              <Button 
-                as={Link} 
-                to="/doctor/consultation-history"
-                variant="outline-success" 
-                className="w-100 d-flex flex-column align-items-center py-3"
-              >
-                <FileText size={24} className="mb-2" />
-                Consultation History
-              </Button>
-            </Col>
-            <Col md={3} sm={6}>
-              <Button 
-                as={Link} 
-                to="/doctor/lab-requests"
-                variant="outline-warning" 
-                className="w-100 d-flex flex-column align-items-center py-3"
-              >
-                <Activity size={24} className="mb-2" />
-                Lab Requests
-              </Button>
-            </Col>
-            <Col md={3} sm={6}>
-              <Button 
-                as={Link} 
-                to="/doctor/lab-results"
-                variant="outline-info" 
-                className="w-100 d-flex flex-column align-items-center py-3"
-              >
-                <Clipboard size={24} className="mb-2" />
-                Lab Results
-              </Button>
-            </Col>
-          </Row>
-        </Card.Body>
-      </Card>
-
-      {/* Today's Schedule */}
-      <Row>
-        <Col lg={8}>
-          <Card>
-            <Card.Header className="bg-white d-flex justify-content-between align-items-center">
-              <h5 className="mb-0">
-                <Clock size={20} className="me-2" />
-                Today's Appointments
-              </h5>
-              <Link to="/doctor/appointments" className="text-primary">
-                View All
-              </Link>
-            </Card.Header>
-            <Card.Body>
-              {/* Appointment list will go here */}
-              <div className="text-center py-4 text-muted">
-                <Calendar size={32} className="mb-2 opacity-50" />
-                <p>No appointments for today</p>
-              </div>
-            </Card.Body>
-          </Card>
-        </Col>
-        <Col lg={4}>
-          <Card>
-            <Card.Header className="bg-white">
-              <h5 className="mb-0">
-                <AlertCircle size={20} className="me-2" />
-                Urgent Tasks
-              </h5>
-            </Card.Header>
-            <Card.Body>
-              <ul className="list-unstyled mb-0">
-                <li className="mb-2">
-                  <div className="d-flex align-items-center">
-                    <div className="bg-danger rounded-circle p-1 me-2">
-                      <div className="bg-white rounded-circle" style={{ width: '6px', height: '6px' }}></div>
+              <h4 className="mb-3">Doctor Dashboard</h4>
+              <p className="text-muted mb-4">
+                This dashboard is currently under construction. 
+                The doctor module will include patient management, 
+                consultation scheduling, and medical records.
+              </p>
+              
+              <div className="row mt-4">
+                <div className="col-md-3">
+                  <div className="card border-info">
+                    <div className="card-body">
+                      <h6><i className="bi bi-calendar-check text-info"></i> Appointments</h6>
+                      <p className="small text-muted">Manage patient appointments</p>
                     </div>
-                    <span>Review lab results (2 pending)</span>
                   </div>
-                </li>
-                <li className="mb-2">
-                  <div className="d-flex align-items-center">
-                    <div className="bg-warning rounded-circle p-1 me-2">
-                      <div className="bg-white rounded-circle" style={{ width: '6px', height: '6px' }}></div>
+                </div>
+                <div className="col-md-3">
+                  <div className="card border-success">
+                    <div className="card-body">
+                      <h6><i className="bi bi-file-medical text-success"></i> Medical Records</h6>
+                      <p className="small text-muted">Access patient history</p>
                     </div>
-                    <span>Complete consultation notes</span>
                   </div>
-                </li>
-                <li>
-                  <div className="d-flex align-items-center">
-                    <div className="bg-primary rounded-circle p-1 me-2">
-                      <div className="bg-white rounded-circle" style={{ width: '6px', height: '6px' }}></div>
+                </div>
+                <div className="col-md-3">
+                  <div className="card border-warning">
+                    <div className="card-body">
+                      <h6><i className="bi bi-prescription text-warning"></i> Prescriptions</h6>
+                      <p className="small text-muted">Create and manage prescriptions</p>
                     </div>
-                    <span>Update patient records</span>
                   </div>
-                </li>
-              </ul>
-            </Card.Body>
-          </Card>
-        </Col>
-      </Row>
+                </div>
+                <div className="col-md-3">
+                  <div className="card border-danger">
+                    <div className="card-body">
+                      <h6><i className="bi bi-graph-up text-danger"></i> Analytics</h6>
+                      <p className="small text-muted">View practice analytics</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="mt-5">
+                <p className="text-muted small">
+                  <i className="bi bi-info-circle me-1"></i>
+                  This page confirms that Doctor login and routing is working correctly.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

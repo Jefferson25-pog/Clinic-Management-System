@@ -1,17 +1,17 @@
-# authentication/serializers.py - FIXED ROLE ASSIGNMENT
+# authentication/serializers.py - COMPLETE FIXED VERSION
 from rest_framework import serializers
 from django.contrib.auth.models import User, Group
 from django.contrib.auth import authenticate
 from django.db.models import Q
 from rest_framework_simplejwt.tokens import RefreshToken
 from adminapp.models import StaffDetail
-from adminapp.serializers import StaffDetailsSerializer
 
 class GroupSerializer(serializers.ModelSerializer):
     class Meta:
         model = Group
         fields = ['id', 'name']
 
+# authentication/serializers.py - UPDATE UserSerializer
 class UserSerializer(serializers.ModelSerializer):
     groups = GroupSerializer(many=True, read_only=True)
     role = serializers.SerializerMethodField()
@@ -19,31 +19,38 @@ class UserSerializer(serializers.ModelSerializer):
     is_active = serializers.BooleanField(read_only=True)
     date_joined = serializers.DateTimeField(read_only=True)
     has_staff_account = serializers.SerializerMethodField()
+    custom_user_id = serializers.SerializerMethodField()
+    profile = serializers.SerializerMethodField()
     
     class Meta:
         model = User
         fields = ['id', 'username', 'email', 'first_name', 'last_name', 
                   'is_staff', 'is_superuser', 'is_active', 'date_joined', 
-                  'last_login', 'groups', 'role', 'staff_detail', 'has_staff_account']
+                  'last_login', 'groups', 'role', 'staff_detail', 
+                  'has_staff_account', 'custom_user_id', 'profile']
         read_only_fields = ['is_staff', 'is_superuser', 'is_active', 
                           'date_joined', 'last_login', 'groups', 'role', 
-                          'staff_detail', 'has_staff_account']
+                          'staff_detail', 'has_staff_account', 'custom_user_id', 'profile']
     
     def get_role(self, obj):
         try:
+            # Priority 1: Super Admin
             if obj.is_superuser:
                 return 'Super Admin'
+            # Priority 2: Staff role from profile (MOST IMPORTANT)
             elif hasattr(obj, 'profile') and obj.profile.staff_detail:
                 return obj.profile.staff_detail.Role
+            # Priority 3: Admin user
             elif hasattr(obj, 'profile') and obj.profile.is_admin_user:
                 return 'Admin'
+            # Priority 4: Staff flag
             elif obj.is_staff:
                 return 'Staff'
-            # Check groups for role
+            # Priority 5: Group role
             elif obj.groups.exists():
                 return obj.groups.first().name
             return 'User'
-        except Exception as e:
+        except:
             return 'User'
     
     def get_staff_detail(self, obj):
@@ -68,6 +75,27 @@ class UserSerializer(serializers.ModelSerializer):
             return hasattr(obj, 'profile') and obj.profile.staff_detail is not None
         except:
             return False
+    
+    def get_custom_user_id(self, obj):
+        try:
+            if hasattr(obj, 'profile'):
+                return obj.profile.custom_user_id
+        except:
+            return None
+    
+    def get_profile(self, obj):
+        try:
+            if hasattr(obj, 'profile'):
+                profile = obj.profile
+                return {
+                    'custom_user_id': profile.custom_user_id,
+                    'user_type': profile.user_type,
+                    'last_activity': profile.last_activity,
+                    'created_at': profile.created_at,
+                    'staff_detail_id': profile.staff_detail_id
+                }
+        except:
+            return None
 
 class AdminLoginSerializer(serializers.Serializer):
     username = serializers.CharField()
@@ -82,9 +110,18 @@ class AdminLoginSerializer(serializers.Serializer):
         if user is None:
             raise serializers.ValidationError('Invalid credentials')
         
+        # Check user is active
+        if not user.is_active:
+            raise serializers.ValidationError('User account is inactive')
+        
+        # Admin users: superuser, staff, or admin profile
         if not (user.is_superuser or user.is_staff or 
                 (hasattr(user, 'profile') and user.profile.is_admin_user)):
             raise serializers.ValidationError('Not authorized for admin access')
+        
+        # Don't allow staff users to use admin login
+        if hasattr(user, 'profile') and user.profile.staff_detail:
+            raise serializers.ValidationError('Staff users must use staff login')
         
         refresh = RefreshToken.for_user(user)
         
@@ -94,6 +131,7 @@ class AdminLoginSerializer(serializers.Serializer):
         
         return data
 
+# authentication/serializers.py - ADD EXTRA VALIDATION
 class StaffLoginSerializer(serializers.Serializer):
     username = serializers.CharField()
     password = serializers.CharField(write_only=True)
@@ -107,22 +145,56 @@ class StaffLoginSerializer(serializers.Serializer):
         if user is None:
             raise serializers.ValidationError('Invalid credentials')
         
-        if not (hasattr(user, 'profile') and user.profile.staff_detail):
-            raise serializers.ValidationError('No staff profile found')
+        # Check user is active
+        if not user.is_active:
+            raise serializers.ValidationError('User account is inactive')
+        
+        # Check if user has profile
+        if not hasattr(user, 'profile'):
+            raise serializers.ValidationError('User profile not found. Please contact administrator.')
+        
+        # Check if user has staff profile
+        if not user.profile.staff_detail:
+            raise serializers.ValidationError('No staff profile linked to this user. Please contact administrator.')
         
         staff = user.profile.staff_detail
-        if staff.Status not in ['Available', 'Busy']:
-            raise serializers.ValidationError('Staff account is not active')
         
-        refresh = RefreshToken.for_user(user)
+        # CRITICAL: Validate staff object
+        if not staff:
+            raise serializers.ValidationError('Staff profile exists but staff detail is empty')
         
-        data['user'] = user
-        data['staff_detail'] = staff
-        data['refresh'] = str(refresh)
-        data['access'] = str(refresh.access_token)
+        # Check if staff has Role attribute
+        if not hasattr(staff, 'Role'):
+            raise serializers.ValidationError('Staff role is not defined in database')
         
-        return data
+        if not staff.Role:
+            raise serializers.ValidationError('Staff role is empty. Please contact administrator.')
+        
+        # Check staff account is active
+        if not staff.account_active:
+            raise serializers.ValidationError('Staff account is deactivated. Please contact administrator.')
+        
+        # Check staff status - handle None case
+        status = getattr(staff, 'Status', None)
+        if status and status not in ['Available', 'Busy']:
+            raise serializers.ValidationError(f'Staff is {status} and not available for login.')
+        
+        # IMPORTANT: Generate tokens
+        try:
+            refresh = RefreshToken.for_user(user)
+            
+            # Set data for view to handle
+            data['user'] = user
+            data['staff_detail'] = staff
+            data['refresh'] = str(refresh)
+            data['access'] = str(refresh.access_token)
+            
+            return data
+            
+        except Exception as e:
+            raise serializers.ValidationError(f'Failed to generate authentication tokens: {str(e)}')
 
+# authentication/serializers.py - UPDATE UserCreateSerializer
 class UserCreateSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, style={'input_type': 'password'})
     role = serializers.CharField(write_only=True, required=False, default='User')
@@ -133,28 +205,35 @@ class UserCreateSerializer(serializers.ModelSerializer):
         fields = ['username', 'email', 'password', 'confirm_password', 'role']
     
     def validate(self, data):
-        # Check if passwords match
         if data['password'] != data['confirm_password']:
-            raise serializers.ValidationError("Passwords do not match")
+            raise serializers.ValidationError({"non_field_errors": ["Passwords do not match"]})
         
-        # Check password strength
         if len(data['password']) < 8:
-            raise serializers.ValidationError("Password must be at least 8 characters long")
+            raise serializers.ValidationError({"non_field_errors": ["Password must be at least 8 characters long"]})
         
-        # Check if username exists
         if User.objects.filter(username=data['username']).exists():
-            raise serializers.ValidationError("Username already exists")
+            raise serializers.ValidationError({"non_field_errors": ["Username already exists"]})
         
-        # Check if email exists
-        if User.objects.filter(email=data['email']).exists():
-            raise serializers.ValidationError("Email already exists")
+        # Handle email validation - make it truly optional
+        email = data.get('email', '').strip()
         
-        # Validate role
+        if email:  # Only validate if email is provided and not empty
+            # Validate email format
+            if '@' not in email or '.' not in email:
+                raise serializers.ValidationError({"email": ["Enter a valid email address."]})
+            
+            # Check if email exists (excluding empty strings)
+            if User.objects.filter(email=email).exclude(email__in=['', None]).exists():
+                raise serializers.ValidationError({"email": ["Email already exists."]})
+        else:
+            # Set to empty string if not provided
+            data['email'] = ''
+        
         role = data.get('role', 'User')
         valid_roles = ['Admin', 'Super Admin', 'Doctor', 'Receptionist', 
                       'Pharmacist', 'Lab Technician', 'Staff', 'User']
         if role not in valid_roles:
-            raise serializers.ValidationError(f"Invalid role. Must be one of: {', '.join(valid_roles)}")
+            raise serializers.ValidationError({"non_field_errors": [f"Invalid role. Must be one of: {', '.join(valid_roles)}"]})
         
         return data
     
@@ -162,25 +241,30 @@ class UserCreateSerializer(serializers.ModelSerializer):
         role = validated_data.pop('role', 'User')
         confirm_password = validated_data.pop('confirm_password')
         
-        # Create the user
+        # Handle email - ensure it's empty string if not provided
+        email = validated_data.get('email', '').strip()
+        if not email:
+            validated_data['email'] = ''
+        
         user = User.objects.create_user(
             username=validated_data['username'],
-            email=validated_data['email'],
+            email=validated_data['email'],  # Will be empty string if not provided
             password=validated_data['password']
         )
         
-        # Assign role based on group
         if role:
-            # Get or create the group
-            group, created = Group.objects.get_or_create(name=role)
-            user.groups.add(group)
-            
-            # Handle Admin and Super Admin roles
-            if role in ['Admin', 'Super Admin']:
-                user.is_staff = True
-                if role == 'Super Admin':
-                    user.is_superuser = True
-                user.save()
+            try:
+                group, created = Group.objects.get_or_create(name=role)
+                user.groups.add(group)
+                
+                if role in ['Admin', 'Super Admin']:
+                    user.is_staff = True
+                    if role == 'Super Admin':
+                        user.is_superuser = True
+                    user.save()
+            except Exception as e:
+                # Log error but don't fail user creation
+                print(f"Error adding group {role}: {e}")
         
         return user
 
@@ -198,15 +282,6 @@ class PasswordChangeSerializer(serializers.Serializer):
         
         return data
 
-class PasswordResetSerializer(serializers.Serializer):
-    new_password = serializers.CharField(required=True, min_length=8)
-    confirm_password = serializers.CharField(required=True)
-    
-    def validate(self, data):
-        if data['new_password'] != data['confirm_password']:
-            raise serializers.ValidationError("Passwords do not match")
-        return data
-
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
@@ -214,20 +289,15 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         data = super().validate(attrs)
 
         user = self.user
-        staff = None
         
-        if hasattr(user, 'profile'):
-            staff = user.profile.staff_detail
-
-        # Define role from groups first, then other attributes
-        if user.groups.exists():
-            role = user.groups.first().name
-        elif user.is_superuser:
+        if user.is_superuser:
             role = "Super Admin"
         elif user.is_staff:
-            role = "Staff"
-        elif staff:
-            role = staff.Role
+            role = "Admin"
+        elif hasattr(user, 'profile') and user.profile.staff_detail:
+            role = user.profile.staff_detail.Role
+        elif user.groups.exists():
+            role = user.groups.first().name
         else:
             role = "User"
 
@@ -236,9 +306,4 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         data["username"] = user.username
         data["email"] = user.email
         
-        # Add staff info if exists
-        if staff:
-            data["staff_id"] = staff.STAFF_IDA
-            data["staff_name"] = staff.Name
-
         return data

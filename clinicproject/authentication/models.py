@@ -4,26 +4,79 @@ from django.contrib.auth.models import User, Group
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.utils import timezone
-from adminapp.models import StaffDetail
+from datetime import date
+import uuid
 
+# authentication/models.py - UPDATE UserProfile model
 class UserProfile(models.Model):
+    USER_TYPE_CHOICES = [
+        ('STANDALONE', 'Standalone User'),
+        ('STAFF_LINKED', 'Linked to Staff'),
+        ('ADMIN', 'Admin User'),
+        ('SUPER_ADMIN', 'Super Admin'),
+    ]
+    
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     staff_detail = models.ForeignKey('adminapp.StaffDetail', on_delete=models.SET_NULL, null=True, blank=True)
     is_admin_user = models.BooleanField(default=False)
     last_activity = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    custom_user_id = models.CharField(max_length=20, unique=True, null=True, blank=True)
+    user_type = models.CharField(max_length=20, choices=USER_TYPE_CHOICES, default='STANDALONE')
     
     class Meta:
         db_table = 'user_profiles'
     
     def __str__(self):
-        return f"{self.user.username} - {self.staff_detail.Role if self.staff_detail else 'Admin'}"
+        return f"{self.user.username} - {self.staff_detail.Role if self.staff_detail else 'Standalone'}"
     
-    def update_last_activity(self):
-        """Update the last activity timestamp"""
-        self.last_activity = timezone.now()
-        self.save()
+    def save(self, *args, **kwargs):
+        if not self.custom_user_id:
+            # Generate custom user ID based on user type
+            if self.user.is_superuser:
+                prefix = "SUPER"
+                self.user_type = 'SUPER_ADMIN'
+            elif self.user.is_staff or self.is_admin_user:
+                prefix = "ADMIN"
+                self.user_type = 'ADMIN'
+            elif self.staff_detail:
+                role_prefixes = {
+                    'Doctor': 'DOC',
+                    'Receptionist': 'REC',
+                    'Pharmacist': 'PHRM',
+                    'Lab Technician': 'LBTCH',
+                    'Admin': 'ADM'
+                }
+                prefix = role_prefixes.get(self.staff_detail.Role, 'STAFF')
+                self.user_type = 'STAFF_LINKED'
+            else:
+                prefix = "USER"
+                self.user_type = 'STANDALONE'
+            
+            # Find the next number
+            last_user = UserProfile.objects.filter(
+                custom_user_id__startswith=prefix
+            ).order_by('custom_user_id').last()
+            
+            if last_user and last_user.custom_user_id:
+                try:
+                    # Extract number from something like "USER-0001"
+                    import re
+                    match = re.search(r'(\d+)$', last_user.custom_user_id)
+                    if match:
+                        last_num = int(match.group(1))
+                        new_num = last_num + 1
+                    else:
+                        new_num = 1
+                except:
+                    new_num = 1
+            else:
+                new_num = 1
+            
+            self.custom_user_id = f"{prefix}-{new_num:04d}"
+        
+        super().save(*args, **kwargs)
 
 class SystemLog(models.Model):
     LOG_LEVEL_CHOICES = [
@@ -97,8 +150,17 @@ class LoginHistory(models.Model):
     
     def get_session_duration_display(self):
         """Format session duration for display"""
+        # For failed logins, return N/A
+        if not self.success:
+            return "N/A"
+        
+        # For successful logins without logout timestamp
+        if not self.session_duration and not self.logout_timestamp:
+            return "Still active"
+        
+        # For successful logins with session duration
         if not self.session_duration:
-            return "Still logged in" if not self.logout_timestamp else "N/A"
+            return "N/A"
         
         hours = self.session_duration // 3600
         minutes = (self.session_duration % 3600) // 60
@@ -115,6 +177,14 @@ class LoginHistory(models.Model):
     def is_active(self):
         """Check if session is still active"""
         return self.success and not self.logout_timestamp
+    
+    def save(self, *args, **kwargs):
+        # For failed logins, always set logout_timestamp to None and session_duration to None
+        if not self.success:
+            self.logout_timestamp = None
+            self.session_duration = None
+        
+        super().save(*args, **kwargs)
 
 class ActivityMonitor(models.Model):
     id = models.AutoField(primary_key=True)

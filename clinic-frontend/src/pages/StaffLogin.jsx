@@ -1,4 +1,4 @@
-// src/pages/StaffLogin.jsx - COMPLETE FIXED VERSION
+// src/pages/StaffLogin.jsx - UPDATED VERSION
 import React, { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -10,21 +10,12 @@ const ROLE_MAP = {
   lab: "Lab Technician",
 };
 
-const MODULE_REDIRECT = {
-  doctor: "/doctor",
-  reception: "/reception",
-  pharmacy: "/pharmacy",
-  lab: "/labtechnician", // Fixed: was "/lab"
-};
-
 const StaffLogin = () => {
   const { roleSlug } = useParams();
   const navigate = useNavigate();
   const { loginStaff } = useAuth();
 
   const selectedRole = ROLE_MAP[roleSlug];
-  const modulePath = MODULE_REDIRECT[roleSlug];
-
   const [form, setForm] = useState({ username: "", password: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -56,20 +47,37 @@ const StaffLogin = () => {
     setError("");
     setLoading(true);
     
-    if (!form.username.trim() || !form.password.trim()) {
+    const username = form.username.trim();
+    const password = form.password.trim();
+    
+    if (!username || !password) {
       setError("Please enter both username and password");
       setLoading(false);
       return;
     }
     
     try {
-      await loginStaff(selectedRole, form.username, form.password);
-      navigate(modulePath, { replace: true });
+      const result = await loginStaff(roleSlug, username, password);
+      
+      if (result && result.success) {
+        // Redirect to the path returned by backend
+        navigate(result.redirectPath, { replace: true });
+      } else {
+        setError("Login failed. Please try again.");
+      }
     } catch (err) {
-      setError(
-        err.message || 
-        `Invalid credentials for ${selectedRole}. Please check username/password.`
-      );
+      // Display specific error messages
+      if (err.message.includes('registered as')) {
+        setError(err.message);
+      } else if (err.message.includes('inactive')) {
+        setError("Your account is inactive. Please contact administrator.");
+      } else if (err.message.includes('No staff profile')) {
+        setError("No staff profile found. Please contact administrator.");
+      } else if (err.message.includes('Invalid credentials')) {
+        setError("Invalid username or password.");
+      } else {
+        setError(err.message || `Login failed for ${selectedRole}. Please check credentials.`);
+      }
     } finally {
       setLoading(false);
     }
@@ -83,17 +91,17 @@ const StaffLogin = () => {
             <h4 className="card-title fw-bold mb-2">{selectedRole} Login</h4>
             <div className="alert alert-info py-2 mb-0">
               <small className="d-block">
-                <strong>Note:</strong> You must be registered as <strong>{selectedRole}</strong>
-              </small>
-              <small>
-                Logging in with a different role will be rejected.
+                <strong>Note:</strong> Only <strong>{selectedRole}</strong> can login here
               </small>
             </div>
           </div>
           
           {error && (
             <div className="alert alert-danger py-2 mb-3">
-              <small>{error}</small>
+              <small className="d-flex align-items-center">
+                <i className="bi bi-exclamation-triangle-fill me-2"></i>
+                {error}
+              </small>
             </div>
           )}
           
@@ -109,6 +117,7 @@ const StaffLogin = () => {
                 placeholder="Enter your username"
                 disabled={loading}
                 required
+                autoFocus
               />
             </div>
             <div className="mb-4">

@@ -1,7 +1,8 @@
-// src/modules/admin/pages/CredentialsManagement.jsx - UPDATED WITH STAFF NAME
+// src/modules/admin/pages/CredentialsManagement.jsx - COMPLETE FIXED
 import React, { useState, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { adminApi } from "../services/adminApi.js";
+import AddAccountModal from "../components/AddAccountModal.jsx";
 
 const CredentialsManagement = () => {
   const [users, setUsers] = useState([]);
@@ -12,6 +13,7 @@ const CredentialsManagement = () => {
     role: "",
     account_status: "",
   });
+  const [showAddUserModal, setShowAddUserModal] = useState(false);
   const navigate = useNavigate();
 
   const fetchUsers = async () => {
@@ -19,7 +21,6 @@ const CredentialsManagement = () => {
       setLoading(true);
       setError("");
       
-      // Build query parameters
       const params = {};
       if (filters.search) params.search = filters.search;
       if (filters.role) params.role = filters.role;
@@ -28,7 +29,6 @@ const CredentialsManagement = () => {
       
       let usersData = [];
       
-      // Handle different response formats
       if (response.data) {
         if (Array.isArray(response.data)) {
           usersData = response.data;
@@ -56,12 +56,10 @@ const CredentialsManagement = () => {
       
       // Process users to extract staff information
       usersData = usersData.map(user => {
-        // Extract staff information from different possible locations
         let staffName = null;
         let staffId = null;
         let staffRole = null;
         
-        // Check profile.staff_detail
         if (user.profile && user.profile.staff_detail) {
           staffName = user.profile.staff_detail.Name || 
                      user.profile.staff_detail.name;
@@ -71,7 +69,6 @@ const CredentialsManagement = () => {
           staffRole = user.profile.staff_detail.Role || 
                      user.profile.staff_detail.role;
         }
-        // Check staff_detail directly
         else if (user.staff_detail) {
           staffName = user.staff_detail.Name || 
                      user.staff_detail.name;
@@ -91,7 +88,6 @@ const CredentialsManagement = () => {
         };
       });
       
-      console.log("Processed users with staff info:", usersData);
       setUsers(usersData);
     } catch (err) {
       console.error("Error fetching users:", err);
@@ -127,38 +123,48 @@ const CredentialsManagement = () => {
     fetchUsers();
   };
 
-  // UPDATED: Function to handle reset password navigation with staff name
+  // Function to handle reset password navigation
   const handleResetPassword = (user) => {
-    console.log("User data for reset:", user);
+    const isStaffLinked = user.has_staff_link || 
+                         (user.profile && user.profile.staff_detail);
     
-    // Extract staff ID
-    let staffId = user.staff_id || user.id;
-    
-    if (staffId) {
-      console.log("Navigating to reset password with ID:", staffId);
-      
-      // Navigate with user data in state
-      navigate(`/admin/staff/reset-password/${staffId}`, {
-        state: { 
-          user: user,
-          staffName: user.staff_name,
-          staffId: user.staff_id
-        }
-      });
+    if (isStaffLinked) {
+      // User is linked to staff
+      const staffId = user.staff_id;
+      if (staffId) {
+        navigate(`/admin/reset-password/staff/${staffId}`, {
+          state: { 
+            type: 'staff',
+            user: user,
+            staffName: user.staff_name,
+            staffId: staffId,
+            username: user.username
+          }
+        });
+      } else {
+        alert("Cannot reset password: No staff ID found.");
+      }
     } else {
-      alert("Cannot reset password: No valid ID found.");
+      // Standalone user
+      const userId = user.id;
+      if (userId) {
+        navigate(`/admin/reset-password/user/${userId}`, {
+          state: { 
+            type: 'user',
+            user: user,
+            username: user.username
+          }
+        });
+      } else {
+        alert("Cannot reset password: No user ID found.");
+      }
     }
   };
 
-  // UPDATED: Function to check if user has staff link
-  const hasStaffLink = (user) => {
-    return user.has_staff_link || 
-           user.has_staff_account || 
-           (user.profile && user.profile.staff_detail) ||
-           user.staff_detail;
+  const handleUserCreated = (newUser) => {
+    fetchUsers();
   };
 
-  // Function to get staff name display
   const getStaffNameDisplay = (user) => {
     if (user.staff_name) {
       return (
@@ -168,7 +174,7 @@ const CredentialsManagement = () => {
             <small className="text-muted">{user.staff_role}</small>
           )}
           {user.staff_id && (
-            <small className="text-muted ms-2">ID: #{user.staff_id}</small>
+            <small className="text-muted ms-2">Staff ID: #{user.staff_id}</small>
           )}
         </div>
       );
@@ -195,7 +201,7 @@ const CredentialsManagement = () => {
       return <span className="badge bg-danger">Inactive</span>;
     }
     
-    if (hasStaffLink(user)) {
+    if (user.has_staff_link || (user.profile && user.profile.staff_detail)) {
       return <span className="badge bg-success">Linked to Staff</span>;
     }
     
@@ -212,9 +218,12 @@ const CredentialsManagement = () => {
           </p>
         </div>
         <div className="btn-group">
-          <Link to="/auth/users/create" className="btn btn-primary">
+          <button 
+            className="btn btn-primary"
+            onClick={() => navigate('/admin/users/create')}
+          >
             <i className="bi bi-person-plus me-2"></i>Create New User
-          </Link>
+          </button>
         </div>
       </div>
 
@@ -325,9 +334,12 @@ const CredentialsManagement = () => {
                   ? "No users match your filters. Try different criteria." 
                   : "No users found."}
               </p>
-              <Link to="/auth/users/create" className="btn btn-primary mt-2">
+              <button 
+                className="btn btn-primary mt-2"
+                onClick={() => navigate('/admin/users/create')}
+              >
                 <i className="bi bi-person-plus me-1"></i>Create New User
-              </Link>
+              </button>
             </div>
           ) : (
             <div className="table-responsive">
@@ -344,72 +356,65 @@ const CredentialsManagement = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {users.map((user) => {
-                    const isLinked = hasStaffLink(user);
-                    return (
-                      <tr key={user.id}>
-                        <td>
-                          <div className="fw-medium">{user.username}</div>
-                          <small className="text-muted">User ID: #{user.id}</small>
-                        </td>
-                        <td>
-                          {getStaffNameDisplay(user)}
-                        </td>
-                        <td>{user.email || <span className="text-muted">-</span>}</td>
-                        <td>
-                          <span className={`badge ${getRoleBadge(user.role)}`}>
-                            {user.role || 'User'}
+                  {users.map((user) => (
+                    <tr key={user.id}>
+                      <td>
+                        <div className="fw-medium">{user.username}</div>
+                        <small className="text-muted">User ID: #{user.id}</small>
+                      </td>
+                      <td>{getStaffNameDisplay(user)}</td>
+                      <td>{user.email || <span className="text-muted">-</span>}</td>
+                      <td>
+                        <span className={`badge ${getRoleBadge(user.role)}`}>
+                          {user.role || 'User'}
+                        </span>
+                      </td>
+                      <td>
+                        {getAccountStatusBadge(user)}
+                        {user.is_superuser && (
+                          <span className="badge bg-dark ms-1">Superuser</span>
+                        )}
+                      </td>
+                      <td>
+                        {user.has_staff_link ? (
+                          <span className="badge bg-success">
+                            <i className="bi bi-link-45deg me-1"></i>
+                            Linked
                           </span>
-                        </td>
-                        <td>
-                          {getAccountStatusBadge(user)}
-                          {user.is_superuser && (
-                            <span className="badge bg-dark ms-1">Superuser</span>
-                          )}
-                        </td>
-                        <td>
-                          {isLinked ? (
-                            <span className="badge bg-success">
-                              <i className="bi bi-link-45deg me-1"></i>
-                              Linked
-                            </span>
-                          ) : (
-                            <span className="badge bg-secondary">
-                              <i className="bi bi-unlink me-1"></i>
-                              Not Linked
-                            </span>
-                          )}
-                        </td>
-                        <td className="text-end">
-                          <div className="btn-group btn-group-sm" style={{ gap: '5px' }}>
-                            {/* Reset Password Button */}
-                            <button
-                              className={`btn btn-warning btn-sm ${!isLinked ? 'disabled opacity-75' : ''}`}
-                              onClick={() => handleResetPassword(user)}
-                              title={isLinked ? "Reset Password" : "No staff link found"}
-                              disabled={!isLinked}
-                            >
-                              <i className="bi bi-key"></i> 
-                            </button>
-                            
-                            
-                            <button
-                              className="btn btn-outline-danger btn-sm"
-                              onClick={() => {
-                                if (window.confirm(`Delete user ${user.username}?`)) {
-                                  // Add delete functionality here
-                                  alert("Delete functionality to be implemented");
-                                }
-                              }}
-                              title="Delete User"
-                            >
-                              <i className="bi bi-trash"></i>
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                        ) : (
+                          <span className="badge bg-secondary">
+                            <i className="bi bi-unlink me-1"></i>
+                            Not Linked
+                          </span>
+                        )}
+                      </td>
+                      <td className="text-end">
+                        <div className="btn-group btn-group-sm" style={{ gap: '5px' }}>
+                          {/* Reset Password Button */}
+                          <button
+                            className="btn btn-warning btn-sm"
+                            onClick={() => handleResetPassword(user)}
+                            title="Reset Password"
+                          >
+                            <i className="bi bi-key"></i> 
+                          </button>
+                          
+                          <button
+                            className="btn btn-outline-danger btn-sm"
+                            onClick={() => {
+                              if (window.confirm(`Delete user ${user.username}?`)) {
+                                // TODO: Implement delete functionality
+                                alert("Delete functionality to be implemented");
+                              }
+                            }}
+                            title="Delete User"
+                          >
+                            <i className="bi bi-trash"></i>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
