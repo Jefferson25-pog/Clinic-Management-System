@@ -1,4 +1,4 @@
-// src/routes/AppRoutes.jsx - UPDATED WITH NEW RECEPTIONIST PAGES
+// src/routes/AppRoutes.jsx - FIXED DOCTOR ROUTES
 import React, { Suspense } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import ProtectedRoute from "./ProtectedRoute";
@@ -54,9 +54,13 @@ import BillsListPage from "../modules/reception/pages/billing/BillsListPage";
 import CreateBillPage from "../modules/reception/pages/billing/CreateBillPage";
 import BillDetailsPage from "../modules/reception/pages/billing/BillDetailsPage";
 
-
 // Staff Module Pages
 import DoctorDashboard from "../modules/doctor/pages/DoctorDashboard";
+import Appointments from "../modules/doctor/pages/Appointments";
+import LabRequests from "../modules/doctor/pages/LabRequests";
+import ConsultationForm from "../modules/doctor/pages/ConsultationForm";
+import ConsultationHistory from "../modules/doctor/pages/ConsultationHistory";
+import LabResults from "../modules/doctor/pages/LabResults";
 import PharmacyDashboard from "../modules/pharmacy/pages/PharmacyDashboard";
 import LabTechDashboard from "../modules/labtechnician/pages/LabTechDashboard";
 
@@ -115,41 +119,46 @@ const AppRoutes = () => {
         </Route>
 
         {/* ============= PROTECTED RECEPTIONIST ROUTES ============= */}
-      <Route element={<ProtectedRoute allowedRoles={["Receptionist"]} />}>
-        {/* Reception Dashboard */}
-        <Route path="/reception" element={<MainLayout><ReceptionDashboard /></MainLayout>} />
-        <Route path="/reception/dashboard" element={<Navigate to="/reception" replace />} />
-  
-        {/* Patient Management Routes - NEW STRUCTURE */}
-        <Route path="/reception/patients/list" element={<MainLayout><PatientsListPage /></MainLayout>} />
-        <Route path="/reception/patients/add" element={<MainLayout><AddPatientPage /></MainLayout>} />
-        <Route path="/reception/patients/edit/:id" element={<MainLayout><EditPatientPage /></MainLayout>} />
-        <Route path="/reception/patients/view/:id" element={<MainLayout><ViewPatientPage /></MainLayout>} />
-  
-        {/* Appointment Management Routes - NEW STRUCTURE */}
-        <Route path="/reception/appointments/list" element={<MainLayout><AppointmentsListPage /></MainLayout>} />
-        <Route path="/reception/appointments/create" element={<MainLayout><CreateAppointmentPage /></MainLayout>} />
-        <Route path="/reception/appointments/view/:id" element={<MainLayout><ViewAppointmentPage /></MainLayout>} />
-        <Route path="/reception/appointments/edit/:id" element={<MainLayout><EditAppointmentPage /></MainLayout>} />
-  
-        {/* Billing Management Routes - NEW STRUCTURE */}
-        <Route path="/reception/billing" element={<MainLayout><BillingManagementPage /></MainLayout>} />
-        <Route path="/reception/billing/list" element={<MainLayout><BillsListPage /></MainLayout>} />
-        <Route path="/reception/billing/create" element={<MainLayout><CreateBillPage /></MainLayout>} />
-        <Route path="/reception/billing/view/:id" element={<MainLayout><BillDetailsPage /></MainLayout>} />
-  
-        {/* Legacy Routes Redirects */}
-        <Route path="/reception/patients/new" element={<Navigate to="/reception/patients/add" replace />} />
-        <Route path="/reception/appointments/new" element={<Navigate to="/reception/appointments/create" replace />} />
-        <Route path="/reception/billing/new" element={<Navigate to="/reception/billing/create" replace />} />
-      </Route>
-
-        {/* ============= PROTECTED DOCTOR ROUTES ============= */}
-        <Route element={<ProtectedRoute allowedRoles={["Doctor"]} />}>
-          <Route path="/doctor" element={<MainLayout><DoctorDashboard /></MainLayout>} />
-          <Route path="/doctor/dashboard" element={<Navigate to="/doctor" replace />} />
-          <Route path="/doctor/*" element={<Navigate to="/doctor" replace />} />
+        <Route element={<ProtectedRoute allowedRoles={["Receptionist"]} />}>
+          {/* Reception Dashboard */}
+          <Route path="/reception" element={<MainLayout><ReceptionDashboard /></MainLayout>} />
+          <Route path="/reception/dashboard" element={<Navigate to="/reception" replace />} />
+    
+          {/* Patient Management Routes - NEW STRUCTURE */}
+          <Route path="/reception/patients/list" element={<MainLayout><PatientsListPage /></MainLayout>} />
+          <Route path="/reception/patients/add" element={<MainLayout><AddPatientPage /></MainLayout>} />
+          <Route path="/reception/patients/edit/:id" element={<MainLayout><EditPatientPage /></MainLayout>} />
+          <Route path="/reception/patients/view/:id" element={<MainLayout><ViewPatientPage /></MainLayout>} />
+    
+          {/* Appointment Management Routes - NEW STRUCTURE */}
+          <Route path="/reception/appointments/list" element={<MainLayout><AppointmentsListPage /></MainLayout>} />
+          <Route path="/reception/appointments/create" element={<MainLayout><CreateAppointmentPage /></MainLayout>} />
+          <Route path="/reception/appointments/view/:id" element={<MainLayout><ViewAppointmentPage /></MainLayout>} />
+          <Route path="/reception/appointments/edit/:id" element={<MainLayout><EditAppointmentPage /></MainLayout>} />
+    
+          {/* Billing Management Routes - NEW STRUCTURE */}
+          <Route path="/reception/billing" element={<MainLayout><BillingManagementPage /></MainLayout>} />
+          <Route path="/reception/billing/list" element={<MainLayout><BillsListPage /></MainLayout>} />
+          <Route path="/reception/billing/create" element={<MainLayout><CreateBillPage /></MainLayout>} />
+          <Route path="/reception/billing/view/:id" element={<MainLayout><BillDetailsPage /></MainLayout>} />
+    
+          {/* Legacy Routes Redirects */}
+          <Route path="/reception/patients/new" element={<Navigate to="/reception/patients/add" replace />} />
+          <Route path="/reception/appointments/new" element={<Navigate to="/reception/appointments/create" replace />} />
+          <Route path="/reception/billing/new" element={<Navigate to="/reception/billing/create" replace />} />
         </Route>
+
+      {/* ============= PROTECTED DOCTOR ROUTES ============= */}
+      <Route element={<ProtectedRoute allowedRoles={["Doctor"]} />}>
+        <Route path="/doctor" element={<MainLayout><DoctorDashboard /></MainLayout>} />
+        <Route path="/doctor/dashboard" element={<Navigate to="/doctor" replace />} />
+        <Route path="/doctor/appointments" element={<MainLayout><Appointments /></MainLayout>} />
+        <Route path="/doctor/consultation/:id?" element={<MainLayout><ConsultationForm /></MainLayout>} />
+        <Route path="/doctor/lab-requests" element={<MainLayout><LabRequests /></MainLayout>} />
+        <Route path="/doctor/lab-results" element={<MainLayout><LabResults /></MainLayout>} />
+        <Route path="/doctor/history" element={<MainLayout><ConsultationHistory /></MainLayout>} />
+        <Route path="/doctor/*" element={<Navigate to="/doctor" replace />} />
+      </Route>
 
         {/* ============= PROTECTED PHARMACIST ROUTES ============= */}
         <Route element={<ProtectedRoute allowedRoles={["Pharmacist"]} />}>

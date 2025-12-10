@@ -3,6 +3,7 @@ from django.conf import settings
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.validators import ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from django.contrib.auth.models import User, Group
 from django.contrib.auth import update_session_auth_hash
@@ -397,44 +398,6 @@ class UserDetailView(APIView):
                 'error': 'User not found'
             }, status=status.HTTP_404_NOT_FOUND)
 
-class ChangePasswordView(APIView):
-    permission_classes = [IsAuthenticated]
-    
-    def post(self, request):
-        serializer = PasswordChangeSerializer(data=request.data)
-        if serializer.is_valid():
-            user = request.user
-            
-            if not user.check_password(serializer.validated_data['old_password']):
-                return Response({
-                    'success': False,
-                    'error': 'Old password is incorrect'
-                }, status=status.HTTP_400_BAD_REQUEST)
-            
-            user.set_password(serializer.validated_data['new_password'])
-            user.save()
-            
-            update_session_auth_hash(request, user)
-            
-            SystemLog.objects.create(
-                level='SECURITY',
-                log_type='SECURITY',
-                user=user,
-                ip_address=request.META.get('REMOTE_ADDR'),
-                action='Password changed',
-                details={'username': user.username}
-            )
-            
-            return Response({
-                'success': True,
-                'message': 'Password changed successfully'
-            })
-        
-        return Response({
-            'success': False,
-            'errors': serializer.errors
-        }, status=status.HTTP_400_BAD_REQUEST)
-
 class UnlinkedUsersView(APIView):
     """Get users not linked to any staff"""
     permission_classes = [permissions.IsAdminUser]
@@ -457,48 +420,6 @@ class UnlinkedUsersView(APIView):
             'users': serializer.data
         })
 
-class UserPasswordResetView(APIView):
-    """Admin resets any user's password"""
-    permission_classes = [permissions.IsAdminUser]
-    
-    def post(self, request, user_id):
-        try:
-            user = User.objects.get(id=user_id)
-        except User.DoesNotExist:
-            return Response({
-                'success': False,
-                'error': 'User not found'
-            }, status=status.HTTP_404_NOT_FOUND)
-        
-        new_password = request.data.get('new_password')
-        if not new_password:
-            return Response({
-                'success': False,
-                'error': 'New password is required'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        if len(new_password) < 8:
-            return Response({
-                'success': False,
-                'error': 'Password must be at least 8 characters long'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        user.set_password(new_password)
-        user.save()
-        
-        SystemLog.objects.create(
-            level='SECURITY',
-            log_type='SECURITY',
-            user=request.user,
-            ip_address=request.META.get('REMOTE_ADDR'),
-            action=f'Password reset for user {user.username}',
-            details={'target_user_id': user_id}
-        )
-        
-        return Response({
-            'success': True,
-            'message': f'Password reset successfully for {user.username}'
-        })
 
 class UserDeleteView(APIView):
     """Delete a user"""
@@ -639,97 +560,6 @@ class ActivityMonitorView(APIView):
             'recent_activities': activities_data,
             'last_activity': last_activity_data,
             'total_activities': ActivityMonitor.objects.count()
-        })
-
-# authentication/views.py - UPDATE DashboardStatsView class
-class DashboardStatsView(APIView):
-    permission_classes = [IsAuthenticated]
-    
-    def get(self, request):
-        from django.contrib.auth.models import User, Group
-        
-        stats = {}
-        user_role = 'User'
-        
-        if request.user.is_superuser:
-            user_role = 'Super Admin'
-        elif request.user.is_staff:
-            user_role = 'Admin'
-        elif hasattr(request.user, 'profile') and request.user.profile.staff_detail:
-            user_role = request.user.profile.staff_detail.Role
-        
-        if request.user.is_staff or request.user.is_superuser:
-            # Use string imports to avoid circular imports
-            try:
-                # Import Department using string path
-                from adminapp.models import Department
-                
-                stats.update({
-                    'total_users': User.objects.count(),
-                    'total_groups': Group.objects.count(),
-                    'today_logins': LoginHistory.objects.filter(
-                        success=True,
-                        timestamp__date=timezone.now().date()
-                    ).count(),
-                    'total_departments': Department.objects.count(),  # ADD THIS
-                    'departments_with_staff': Department.objects.filter(
-                        staff_details__isnull=False
-                    ).distinct().count() if hasattr(Department, 'staff_details') else 0,
-                })
-                
-                # Try to get staff stats if models exist
-                try:
-                    from adminapp.models import StaffDetail
-                    stats.update({
-                        'total_staff': StaffDetail.objects.count(),
-                        'active_staff': StaffDetail.objects.filter(Status='Available').count(),
-                        'doctors_count': StaffDetail.objects.filter(Role='Doctor').count(),
-                        'admins_count': StaffDetail.objects.filter(Role='Admin').count(),
-                    })
-                except Exception as e:
-                    logger.warning(f"Could not load staff stats: {e}")
-                    stats.update({
-                        'total_staff': 0,
-                        'active_staff': 0,
-                        'doctors_count': 0,
-                        'admins_count': 0,
-                    })
-                    
-            except ImportError as e:
-                logger.error(f"DashboardStatsView import error: {e}")
-                stats.update({
-                    'total_users': User.objects.count(),
-                    'total_groups': Group.objects.count(),
-                    'today_logins': 0,
-                    'total_departments': 0,
-                    'departments_with_staff': 0,
-                    'total_staff': 0,
-                    'active_staff': 0,
-                    'doctors_count': 0,
-                    'admins_count': 0,
-                })
-        
-        if hasattr(request.user, 'profile') and request.user.profile.staff_detail:
-            staff = request.user.profile.staff_detail
-            if staff.Role == 'Doctor':
-                stats.update({
-                    'doctor_name': staff.Name,
-                    'department': staff.Department.Department_Name if staff.Department else 'N/A',
-                    'consultation_fees': float(staff.Consultation_fees),
-                    'status': staff.Status,
-                })
-            elif staff.Role == 'Receptionist':
-                stats.update({
-                    'staff_name': staff.Name,
-                    'phone': staff.Phone_Number,
-                    'email': staff.Email,
-                })
-        
-        return Response({
-            'success': True,
-            'stats': stats,
-            'user_role': user_role,
-            'timestamp': timezone.now()
         })
 
 class TrackLogoutView(APIView):
@@ -973,79 +803,6 @@ class ForceLogoutView(APIView):
                 'success': False,
                 'error': str(e) if settings.DEBUG else 'Failed to force logout'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-
-# authentication/views.py - ADD THIS VIEW
-class StaffPasswordResetView(APIView):
-    """Reset password for a staff member's user account"""
-    permission_classes = [permissions.IsAdminUser]
-    
-    def post(self, request, staff_id=None):
-        try:
-            from adminapp.models import StaffDetail
-            staff = StaffDetail.objects.get(STAFF_ID=staff_id)
-        except StaffDetail.DoesNotExist:
-            return Response({
-                'success': False,
-                'error': 'Staff not found'
-            }, status=status.HTTP_404_NOT_FOUND)
-        
-        # Check if staff has a linked user account
-        if not staff.user:
-            return Response({
-                'success': False,
-                'error': 'Staff does not have a linked user account'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        user = staff.user
-        new_password = request.data.get('new_password')
-        
-        if not new_password:
-            return Response({
-                'success': False,
-                'error': 'New password is required'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        if len(new_password) < 8:
-            return Response({
-                'success': False,
-                'error': 'Password must be at least 8 characters long'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Update user password
-        user.set_password(new_password)
-        user.save()
-        
-        # Update staff record
-        staff.last_password_reset = timezone.now()
-        staff.save()
-        
-        # Log the action
-        SystemLog.objects.create(
-            level='SECURITY',
-            log_type='SECURITY',
-            user=request.user,
-            ip_address=request.META.get('REMOTE_ADDR'),
-            action=f'Reset password for staff {staff.Name} (username: {user.username})',
-            details={
-                'staff_id': staff.STAFF_ID,
-                'user_id': user.id,
-                'staff_name': staff.Name,
-                'username': user.username
-            }
-        )
-        
-        return Response({
-            'success': True,
-            'message': f'Password reset successfully for {staff.Name}',
-            'staff': {
-                'id': staff.STAFF_ID,
-                'name': staff.Name,
-                'username': user.username,
-                'email': staff.Email
-            }
-        })
-    
 
 # authentication/views.py - ADD THESE NEW VIEWS
 

@@ -1,4 +1,4 @@
-// src/modules/admin/pages/AdminDashboard.jsx - FIXED DEPARTMENT COUNT
+// src/modules/admin/pages/AdminDashboard.jsx - CORRECTED VERSION
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { adminApi } from "../services/adminApi.js";
@@ -140,40 +140,58 @@ const AdminDashboard = () => {
     }
   };
 
-  // Fetch department count - FIXED VERSION
+  // Fetch department count - CORRECTED VERSION
   const fetchDepartmentCount = async () => {
     try {
       setLoading(prev => ({ ...prev, departments: true }));
       
+      console.log("Fetching department count...");
       const deptResponse = await adminApi.getDepartments();
-      console.log("Department API Response:", deptResponse.data);
+      console.log("Department API Raw Response:", deptResponse);
       
       if (deptResponse.data) {
-        // Handle different response formats
         let departmentCount = 0;
+        const data = deptResponse.data;
         
-        if (deptResponse.data.count !== undefined) {
-          // Format 1: { count: X, results: [...] }
-          departmentCount = deptResponse.data.count;
-        } else if (deptResponse.data.departments && Array.isArray(deptResponse.data.departments)) {
-          // Format 2: { departments: [...] }
-          departmentCount = deptResponse.data.departments.length;
-        } else if (Array.isArray(deptResponse.data)) {
-          // Format 3: Direct array response
-          departmentCount = deptResponse.data.length;
-        } else if (deptResponse.data.success && deptResponse.data.departments) {
-          // Format 4: { success: true, departments: [...] }
-          departmentCount = Array.isArray(deptResponse.data.departments) 
-            ? deptResponse.data.departments.length 
-            : 0;
+        // Format 1: Standard DRF format {count: X, results: [...]}
+        if (data.count !== undefined && data.count !== null) {
+          departmentCount = data.count;
+          console.log("Found department count in data.count:", departmentCount);
+        }
+        // Format 2: Direct array response in results
+        else if (Array.isArray(data.results)) {
+          departmentCount = data.results.length;
+          console.log("Found departments in data.results array:", departmentCount);
+        }
+        // Format 3: Direct array
+        else if (Array.isArray(data)) {
+          departmentCount = data.length;
+          console.log("Found departments in direct array:", departmentCount);
+        }
+        // Format 4: Statistics format
+        else if (data.statistics && data.statistics.total_departments) {
+          departmentCount = data.statistics.total_departments;
+          console.log("Found department count in statistics:", departmentCount);
+        }
+        // Format 5: Success format with results
+        else if (data.success && data.results) {
+          departmentCount = Array.isArray(data.results) ? data.results.length : 0;
+          console.log("Found departments in success.results:", departmentCount);
+        }
+        // Format 6: Backward compatibility
+        else if (data.departments && Array.isArray(data.departments)) {
+          departmentCount = data.departments.length;
+          console.log("Found departments in data.departments:", departmentCount);
         }
         
-        console.log("Calculated Department Count:", departmentCount);
+        console.log("Final calculated department count:", departmentCount);
         
-        setStats(prev => ({
-          ...prev,
-          total_departments: departmentCount
-        }));
+        if (departmentCount > 0) {
+          setStats(prev => ({
+            ...prev,
+            total_departments: departmentCount
+          }));
+        }
       }
     } catch (err) {
       console.error("Error fetching department count:", err);
@@ -183,49 +201,98 @@ const AdminDashboard = () => {
     }
   };
 
-  // Alternative: Fetch staff and get department count from staff data
+  // Alternative: Fetch staff and get department count from staff data - CORRECTED
   const fetchDepartmentCountFromStaff = async () => {
     try {
-      const staffResponse = await adminApi.getStaff();
+      console.log("Fetching staff for department count...");
+      const staffResponse = await adminApi.getStaff({ page_size: 1000 }); // Get all staff
       console.log("Staff API Response:", staffResponse.data);
       
-      if (staffResponse.data && staffResponse.data.success) {
-        const staffList = staffResponse.data.staff || staffResponse.data.results || [];
+      if (staffResponse.data) {
+        // Handle different response formats
+        let staffList = [];
+        
+        if (Array.isArray(staffResponse.data.results)) {
+          staffList = staffResponse.data.results;
+        } else if (Array.isArray(staffResponse.data)) {
+          staffList = staffResponse.data;
+        } else if (staffResponse.data.staff && Array.isArray(staffResponse.data.staff)) {
+          staffList = staffResponse.data.staff;
+        } else if (staffResponse.data.results && Array.isArray(staffResponse.data.results)) {
+          staffList = staffResponse.data.results;
+        } else if (staffResponse.data.success && Array.isArray(staffResponse.data.results)) {
+          staffList = staffResponse.data.results;
+        }
+        
+        console.log("Staff list for department calculation:", staffList.length, "items");
         
         // Extract unique departments from staff
         const departments = new Set();
         staffList.forEach(staff => {
           if (staff.Department && staff.Department.Department_Name) {
             departments.add(staff.Department.Department_Name);
+          } else if (staff.department_name) {
+            departments.add(staff.department_name);
+          } else if (staff.department && typeof staff.department === 'string') {
+            departments.add(staff.department);
+          } else if (staff.Department && typeof staff.Department === 'string') {
+            departments.add(staff.Department);
+          } else if (staff.Department && staff.Department.Department_Name) {
+            departments.add(staff.Department.Department_Name);
           }
         });
         
         console.log("Unique departments from staff:", Array.from(departments));
         
-        setStats(prev => ({
-          ...prev,
-          total_departments: departments.size
-        }));
+        if (departments.size > 0) {
+          setStats(prev => ({
+            ...prev,
+            total_departments: departments.size
+          }));
+        }
       }
     } catch (err) {
       console.error("Error fetching staff for department count:", err);
+      console.error("Error details:", err.response?.data || err.message);
     }
   };
 
-  // Initial data fetch
+  // Initial data fetch - CORRECTED
   useEffect(() => {
     const fetchAllData = async () => {
       try {
+        console.log("Starting dashboard data fetch...");
+        
+        // Fetch stats first
         await fetchDashboardStats();
-        await fetchRecentLogins();
-        await fetchDepartmentCount();
+        
+        // Try to get department count from API directly
+        try {
+          await fetchDepartmentCount();
+        } catch (deptErr) {
+          console.warn("Department API failed, trying staff-based calculation:", deptErr);
+        }
         
         // If department count is still 0, try alternative method
         if (stats.total_departments === 0) {
-          await fetchDepartmentCountFromStaff();
+          console.log("Department count is 0, trying staff-based calculation...");
+          try {
+            await fetchDepartmentCountFromStaff();
+          } catch (staffErr) {
+            console.warn("Staff-based department count also failed:", staffErr);
+          }
         }
+        
+        // Fetch recent logins (less critical)
+        try {
+          await fetchRecentLogins();
+        } catch (loginErr) {
+          console.warn("Failed to fetch recent logins (non-critical):", loginErr);
+        }
+        
       } catch (error) {
         console.error("Error in initial data fetch:", error);
+        setError("Failed to load some dashboard data. Some features may be limited.");
       }
     };
     
@@ -242,16 +309,83 @@ const AdminDashboard = () => {
   // Manual refresh function
   const handleManualRefresh = async () => {
     try {
+      setError("");
       await fetchDashboardStats();
       await fetchRecentLogins();
-      await fetchDepartmentCount();
+      
+      // Try department count
+      try {
+        await fetchDepartmentCount();
+      } catch (deptErr) {
+        console.warn("Department count failed in manual refresh:", deptErr);
+      }
       
       // If department count is still 0, try alternative method
       if (stats.total_departments === 0) {
-        await fetchDepartmentCountFromStaff();
+        try {
+          await fetchDepartmentCountFromStaff();
+        } catch (staffErr) {
+          console.warn("Staff-based count also failed:", staffErr);
+        }
       }
     } catch (error) {
       console.error("Error in manual refresh:", error);
+      setError("Failed to refresh data");
+    }
+  };
+
+  // Debug function to check API responses - UPDATED
+  const debugAPIs = async () => {
+    console.log("=== DEBUG API CALLS ===");
+    
+    try {
+      console.log("1. Testing Dashboard Stats API:");
+      try {
+        const stats = await adminApi.getDashboardStats();
+        console.log("Dashboard Stats:", stats.data);
+      } catch (err) {
+        console.error("Dashboard Stats Error:", err.response?.data || err.message);
+      }
+      
+      console.log("\n2. Testing Departments API:");
+      try {
+        const depts = await adminApi.getDepartments();
+        console.log("Departments Response:", depts.data);
+        console.log("Departments Structure:", {
+          isArray: Array.isArray(depts.data),
+          keys: depts.data ? Object.keys(depts.data) : 'no data',
+          count: depts.data?.count,
+          resultsLength: depts.data?.results?.length
+        });
+      } catch (err) {
+        console.error("Departments API Error:", err.response?.data || err.message);
+      }
+      
+      console.log("\n3. Testing Staff API:");
+      try {
+        const staff = await adminApi.getStaff({ page_size: 2 });
+        console.log("Staff Response:", staff.data);
+        console.log("Staff Structure:", {
+          isArray: Array.isArray(staff.data),
+          keys: staff.data ? Object.keys(staff.data) : 'no data',
+          count: staff.data?.count,
+          resultsLength: staff.data?.results?.length,
+          firstItem: staff.data?.results?.[0]
+        });
+      } catch (err) {
+        console.error("Staff API Error:", err.response?.data || err.message);
+      }
+      
+      console.log("\n4. Testing Login History API:");
+      try {
+        const logins = await adminApi.getLoginHistory({ page_size: 2 });
+        console.log("Login History:", logins.data);
+      } catch (err) {
+        console.error("Login History Error:", err.response?.data || err.message);
+      }
+      
+    } catch (err) {
+      console.error("Debug API Error:", err);
     }
   };
 
@@ -288,32 +422,6 @@ const AdminDashboard = () => {
     return <span className="badge bg-danger"><i className="bi bi-check-circle me-1"></i>Logged Out</span>;
   };
 
-  // Debug function to check API responses
-  const debugAPIs = async () => {
-    console.log("=== DEBUG API CALLS ===");
-    
-    try {
-      console.log("1. Testing Dashboard Stats API:");
-      const stats = await adminApi.getDashboardStats();
-      console.log("Dashboard Stats:", stats.data);
-      
-      console.log("\n2. Testing Departments API:");
-      const depts = await adminApi.getDepartments();
-      console.log("Departments Response:", depts.data);
-      
-      console.log("\n3. Testing Staff API:");
-      const staff = await adminApi.getStaff();
-      console.log("Staff Response:", staff.data);
-      
-      console.log("\n4. Testing Login History API:");
-      const logins = await adminApi.getLoginHistory({ page_size: 2 });
-      console.log("Login History:", logins.data);
-      
-    } catch (err) {
-      console.error("Debug API Error:", err);
-    }
-  };
-
   return (
     <div>
       <div className="d-flex justify-content-between align-items-center mb-4 flex-wrap">
@@ -339,6 +447,13 @@ const AdminDashboard = () => {
               Auto-refresh: 30s
             </small>
           </div>
+          <button 
+            className="btn btn-sm btn-outline-secondary"
+            onClick={debugAPIs}
+            title="Debug API responses"
+          >
+            <i className="bi bi-bug"></i> Debug
+          </button>
         </div>
       </div>
 
@@ -492,7 +607,7 @@ const AdminDashboard = () => {
                 <div className="mt-2">
                   <small className="text-warning">
                     <i className="bi bi-exclamation-triangle me-1"></i>
-                    Check API response format
+                    {error ? "API Error - Check console" : "No departments in database"}
                   </small>
                 </div>
               )}
@@ -578,6 +693,9 @@ const AdminDashboard = () => {
               <span className={`ms-2 badge ${loading.stats || loading.loginHistory || loading.departments ? 'bg-warning' : 'bg-success'}`}>
                 {loading.stats || loading.loginHistory || loading.departments ? 'Loading...' : 'Live'}
               </span>
+              {stats.total_departments === 0 && !loading.departments && (
+                <span className="ms-2 badge bg-danger">No Departments</span>
+              )}
             </small>
           </div>
           <div className="col-md-6 text-md-end">
@@ -588,7 +706,6 @@ const AdminDashboard = () => {
         </div>
       </div>
 
-      {/* Rest of the component remains the same... */}
       {/* Main Content Grid */}
       <div className="row g-4">
         {/* Admin Tiles */}

@@ -1,4 +1,4 @@
-# adminapp/models.py - COMPLETE UPDATED VERSION WITH ALL REQUIREMENTS
+# adminapp/models.py - UPDATED VERSION WITH MULTIPLE QUALIFICATIONS
 from django.db import models
 from django.contrib.auth.models import User
 from django.core.validators import MinValueValidator, MaxValueValidator, RegexValidator
@@ -10,8 +10,209 @@ from django.db import transaction
 from django.utils import timezone
 import logging
 from dateutil.relativedelta import relativedelta
+import json
 
 logger = logging.getLogger(__name__)
+
+# ==================== QUALIFICATION & LICENSE NUMBER FORMATS ====================
+
+# Medical License Number Formats by State in India
+MEDICAL_LICENSE_FORMATS = {
+    'mci': r'^\d{5,10}$',  # MCI Registration Number
+    'tn': r'^TN/\d{4,6}/\d{4}$',  # Tamil Nadu
+    'mh': r'^MH/\d{4,6}/\d{4}$',  # Maharashtra
+    'dl': r'^DL/\d{4,6}/\d{4}$',  # Delhi
+    'ka': r'^KA/\d{4,6}/\d{4}$',  # Karnataka
+    'ap': r'^AP/\d{4,6}/\d{4}$',  # Andhra Pradesh
+    'tg': r'^TG/\d{4,6}/\d{4}$',  # Telangana
+    'gj': r'^GJ/\d{4,6}/\d{4}$',  # Gujarat
+    'up': r'^UP/\d{4,6}/\d{4}$',  # Uttar Pradesh
+    'wb': r'^WB/\d{4,6}/\d{4}$',  # West Bengal
+    'rj': r'^RJ/\d{4,6}/\d{4}$',  # Rajasthan
+    'pb': r'^PB/\d{4,6}/\d{4}$',  # Punjab
+    'hr': r'^HR/\d{4,6}/\d{4}$',  # Haryana
+    'mp': r'^MP/\d{4,6}/\d{4}$',  # Madhya Pradesh
+    'kl': r'^KL/\d{4,6}/\d{4}$',  # Kerala
+}
+
+# Pharmacy License Formats
+PHARMACY_LICENSE_FORMATS = {
+    'state': r'^[A-Z]{2}/\d{4,6}/\d{4}$',
+    'pci': r'^PCI-\d{5,8}$',  # Pharmacy Council of India
+}
+
+# Lab Technician License Formats
+LAB_TECH_LICENSE_FORMATS = {
+    'dmlt': r'^DMLT-\d{4,6}$',
+    'bmlt': r'^BMLT-\d{4,6}$',
+    'state': r'^[A-Z]{2}/LT/\d{4,6}$',
+}
+
+# Qualification Duration Guide (in years)
+QUALIFICATION_DURATIONS = {
+    # DOCTOR QUALIFICATIONS
+    'MBBS': 5.5,
+    'MD': 3,
+    'MS': 3,
+    'DM': 3,
+    'MCh': 3,
+    'DNB': 3,
+    'BAMS': 5.5,
+    'BHMS': 5.5,
+    'BUMS': 5.5,
+    
+    # POSTGRADUATE DIPLOMAS (DOCTORS)
+    'DCH': 2,
+    'DGO': 2,
+    'DLO': 2,
+    'D.Ortho': 2,
+    'DMRD': 2,
+    'DA': 2,
+    'DDVL': 2,
+    'DPM': 2,
+    
+    # PHARMACIST QUALIFICATIONS
+    'D.Pharm': 2,
+    'B.Pharm': 4,
+    'Pharm.D': 6,
+    'M.Pharm': 2,
+    
+    # LAB TECHNICIAN QUALIFICATIONS
+    'DMLT': 2,
+    'BMLT': 3,
+    'B.Sc MLT': 3,
+    'M.Sc MLT': 2,
+    
+    # NURSE QUALIFICATIONS
+    'ANM': 2,
+    'GNM': 3.5,
+    'B.Sc Nursing': 4,
+    'M.Sc Nursing': 2,
+    
+    # OTHER HEALTHCARE QUALIFICATIONS
+    'BPT': 4.5,  # Bachelor of Physiotherapy
+    'MPT': 2,    # Master of Physiotherapy
+    'B.Sc Radiology': 3,
+    'Diploma in Radiology': 2,
+    
+    # ADMIN/OTHER QUALIFICATIONS
+    '10+2': 2,
+    'High School': 2,
+    'Bachelor\'s Degree': 3,
+    'Master\'s Degree': 2,
+    'MBA': 2,
+    'MHA': 2,  # Master of Hospital Administration
+    'Diploma': 1,
+}
+
+# Minimum Starting Age for Qualifications
+QUALIFICATION_STARTING_AGES = {
+    'MBBS': 17,
+    'BAMS': 17,
+    'BHMS': 17,
+    'D.Pharm': 17,
+    'B.Pharm': 17,
+    'DMLT': 17,
+    'BMLT': 17,
+    'ANM': 17,
+    'GNM': 17,
+    '10+2': 15,
+    'High School': 15,
+}
+
+# ==================== QUALIFICATION MODEL ====================
+
+class Qualification(models.Model):
+    """
+    Model to store multiple qualifications for staff
+    """
+    staff = models.ForeignKey(
+        'StaffDetail',
+        on_delete=models.CASCADE,
+        related_name='qualifications',
+        verbose_name="Staff Member"
+    )
+    qualification_name = models.CharField(
+        max_length=200,
+        verbose_name="Qualification Name",
+        help_text="e.g., MBBS, MD, B.Pharm, DMLT, etc."
+    )
+    institution = models.CharField(
+        max_length=300,
+        null=True,
+        blank=True,
+        verbose_name="Institution/University"
+    )
+    year_completed = models.IntegerField(
+        verbose_name="Year Completed",
+        validators=[
+            MinValueValidator(1950, message='Year must be after 1950'),
+            MaxValueValidator(2030, message='Year cannot be in the distant future')
+        ]
+    )
+    specialization = models.CharField(
+        max_length=200,
+        null=True,
+        blank=True,
+        verbose_name="Specialization"
+    )
+    registration_number = models.CharField(
+        max_length=100,
+        null=True,
+        blank=True,
+        verbose_name="Registration/License Number"
+    )
+    is_primary = models.BooleanField(
+        default=False,
+        verbose_name="Primary Qualification",
+        help_text="Mark as primary qualification for this role"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return f"{self.qualification_name} - {self.staff.Name}"
+    
+    def clean(self):
+        """Validate qualification data"""
+        # Validate year
+        current_year = date.today().year
+        if self.year_completed > current_year + 2:  # Allow up to 2 years in future
+            raise ValidationError({
+                'year_completed': f'Year cannot be more than 2 years in the future (Current year: {current_year})'
+            })
+        
+        # Validate qualification name is not empty
+        if not self.qualification_name or len(self.qualification_name.strip()) < 2:
+            raise ValidationError({
+                'qualification_name': 'Qualification name must be at least 2 characters'
+            })
+        
+        # Check if this is a valid qualification
+        qual_name_upper = self.qualification_name.upper()
+        known_qualifications = [q.upper() for q in QUALIFICATION_DURATIONS.keys()]
+        
+        # Check for partial matches (e.g., "MD (Cardiology)" should match "MD")
+        is_valid = any(qual in qual_name_upper for qual in known_qualifications)
+        
+        if not is_valid:
+            # Still allow unknown qualifications with a warning
+            logger.warning(f"Unknown qualification: {self.qualification_name}")
+    
+    def get_duration(self):
+        """Get duration of this qualification in years"""
+        qual_name_upper = self.qualification_name.upper()
+        for qual, duration in QUALIFICATION_DURATIONS.items():
+            if qual.upper() in qual_name_upper:
+                return duration
+        return 0  # Unknown qualification
+    
+    class Meta:
+        db_table = 'STAFF_QUALIFICATIONS'
+        verbose_name = 'Qualification'
+        verbose_name_plural = 'Qualifications'
+        ordering = ['-is_primary', '-year_completed']
+
+# ==================== DEPARTMENT MODEL ====================
 
 class Department(models.Model):
     DEPT_ID = models.CharField(max_length=20, unique=True, primary_key=True, verbose_name="Department ID")
@@ -59,6 +260,8 @@ class Department(models.Model):
         verbose_name_plural = 'Departments'
         ordering = ['DEPT_ID']
 
+# ==================== STAFF DETAIL MODEL ====================
+
 class StaffDetail(models.Model):
     # ROLE_CHOICES with only roles that can have user accounts
     ROLE_CHOICES_WITH_ACCOUNTS = [
@@ -86,10 +289,7 @@ class StaffDetail(models.Model):
     STATUS_CHOICES = [
         ('Available', 'Available'),
         ('Busy', 'Busy'),
-        ('On Leave', 'On Leave'),
-        ('Off Duty', 'Off Duty'),
-        ('In Surgery', 'In Surgery'),
-        ('In Consultation', 'In Consultation'),
+        ('UnAvailable', 'UnAvailable'),
     ]
     
     GENDER_CHOICES = [
@@ -184,10 +384,12 @@ class StaffDetail(models.Model):
     
     # Professional Information
     Role = models.CharField(max_length=20, choices=ROLE_CHOICES, verbose_name="Role")
-    Qualification = models.CharField(max_length=200, null=True, blank=True, verbose_name="Qualification")
+    
+    # Primary qualification fields (kept for backward compatibility)
+    Qualification = models.CharField(max_length=200, null=True, blank=True, verbose_name="Primary Qualification")
     Specialization = models.CharField(max_length=100, null=True, blank=True, verbose_name="Specialization")
     Experience = models.IntegerField(null=True, blank=True, verbose_name="Experience (Years)")
-    License_Number = models.CharField(max_length=50, null=True, blank=True, verbose_name="License Number")
+    License_Number = models.CharField(max_length=50, null=True, blank=True, verbose_name="Primary License Number")
     
     Consultation_fees = models.DecimalField(
         max_digits=10, 
@@ -337,10 +539,14 @@ class StaffDetail(models.Model):
         if self.Role == 'Doctor':
             if not self.Department:
                 raise ValidationError({'Department': 'Doctors must be assigned to a department'})
-            if not self.Qualification:
-                raise ValidationError({'Qualification': 'Doctors must have qualifications'})
-            if not self.License_Number:
-                raise ValidationError({'License_Number': 'Doctors must have a license number'})
+            
+            # Check if doctor has at least one qualification
+            if not self.qualifications.exists() and not self.Qualification:
+                raise ValidationError({'Qualification': 'Doctors must have at least one qualification'})
+            
+            if not self.License_Number and not self.qualifications.filter(registration_number__isnull=False).exists():
+                raise ValidationError({'License_Number': 'Doctors must have at least one license/registration number'})
+            
             if self.Consultation_fees is not None and self.Consultation_fees <= 0:
                 raise ValidationError({'Consultation_fees': 'Doctors must have consultation fees greater than 0'})
         
@@ -359,6 +565,102 @@ class StaffDetail(models.Model):
                 raise ValidationError({
                     'Joining_Date': 'Joining date cannot be in the past. It must be today or in the future.'
                 })
+        
+        # Validate experience against age and qualifications
+        if self.Date_of_Birth and self.Experience is not None:
+            self.validate_experience_realistic()
+    
+    def validate_experience_realistic(self):
+        """Validate that experience is realistic based on age and qualifications"""
+        age = self.calculate_age()
+        if not age or self.Experience is None:
+            return
+        
+        # Get all qualifications
+        qualifications = self.qualifications.all()
+        
+        if qualifications.exists():
+            # Find the earliest qualification completion year
+            earliest_year = min([q.year_completed for q in qualifications])
+            
+            # Calculate maximum possible experience
+            current_year = date.today().year
+            max_possible_experience = current_year - earliest_year
+            
+            if self.Experience > max_possible_experience:
+                raise ValidationError({
+                    'Experience': f'Experience ({self.Experience} years) exceeds maximum possible based on qualifications. Earliest qualification completed in {earliest_year}. Maximum possible experience: {max_possible_experience} years.'
+                })
+        
+        # General validation based on age
+        min_starting_age = 18
+        max_possible_from_age = age - min_starting_age
+        
+        if self.Experience > max_possible_from_age:
+            raise ValidationError({
+                'Experience': f'Experience ({self.Experience} years) is unrealistic for a {age}-year-old staff member. Maximum possible experience would be {max_possible_from_age} years.'
+            })
+    
+    def validate_license_format(self, license_number, role):
+        """Validate license number format based on role"""
+        if not license_number:
+            return True
+        
+        if role == 'Doctor':
+            # Check against all medical license formats
+            for format_name, pattern in MEDICAL_LICENSE_FORMATS.items():
+                if re.match(pattern, license_number):
+                    return True
+            
+            # Generic check for MCI numbers
+            if re.match(r'^\d{5,10}$', license_number):
+                return True
+            
+            raise ValidationError({
+                'License_Number': 'Invalid medical license format. Should be like: 123456 (MCI) or TN/12345/2010 (State Medical Council)'
+            })
+        
+        elif role == 'Pharmacist':
+            if not (re.match(PHARMACY_LICENSE_FORMATS['state'], license_number) or 
+                   re.match(PHARMACY_LICENSE_FORMATS['pci'], license_number)):
+                raise ValidationError({
+                    'License_Number': 'Invalid pharmacy license format. Should be like: PCI-12345 or KA/1234/2015'
+                })
+        
+        elif role == 'Lab Technician':
+            if not (re.match(LAB_TECH_LICENSE_FORMATS['dmlt'], license_number) or 
+                   re.match(LAB_TECH_LICENSE_FORMATS['bmlt'], license_number) or
+                   re.match(LAB_TECH_LICENSE_FORMATS['state'], license_number)):
+                raise ValidationError({
+                    'License_Number': 'Invalid lab technician license format. Should be like: DMLT-1234 or KA/LT/1234'
+                })
+        
+        return True
+    
+    @property
+    def all_qualifications(self):
+        """Get all qualifications as a list"""
+        quals = list(self.qualifications.all().values_list('qualification_name', flat=True))
+        if self.Qualification and self.Qualification not in quals:
+            quals.append(self.Qualification)
+        return quals
+    
+    @property
+    def primary_qualification(self):
+        """Get primary qualification"""
+        primary = self.qualifications.filter(is_primary=True).first()
+        if primary:
+            return primary.qualification_name
+        return self.Qualification
+    
+    @property
+    def license_numbers(self):
+        """Get all license numbers"""
+        licenses = list(self.qualifications.exclude(registration_number__isnull=True)
+                       .values_list('registration_number', flat=True))
+        if self.License_Number and self.License_Number not in licenses:
+            licenses.append(self.License_Number)
+        return licenses
     
     @property
     def can_have_user_account(self):
@@ -388,6 +690,29 @@ class StaffDetail(models.Model):
             experience = relativedelta(today, self.Joining_Date)
             return experience.years
         return self.Experience or 0
+    
+    def get_qualifications_summary(self):
+        """Get formatted summary of all qualifications"""
+        quals = self.qualifications.all()
+        if not quals.exists() and self.Qualification:
+            return self.Qualification
+        
+        summary = []
+        for qual in quals.order_by('-is_primary', '-year_completed'):
+            qual_str = qual.qualification_name
+            if qual.specialization:
+                qual_str += f" ({qual.specialization})"
+            if qual.institution:
+                qual_str += f", {qual.institution}"
+            if qual.year_completed:
+                qual_str += f" ({qual.year_completed})"
+            
+            if qual.is_primary:
+                qual_str = f"⭐ {qual_str}"
+            
+            summary.append(qual_str)
+        
+        return "; ".join(summary)
     
     def create_user_account(self, password=None):
         """Create a user account for staff member (manual creation only)"""

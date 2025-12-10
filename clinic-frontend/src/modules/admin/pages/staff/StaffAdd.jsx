@@ -1,18 +1,22 @@
-// src/modules/admin/pages/staff/StaffAdd.jsx - UPDATED VERSION
+// src/modules/admin/pages/staff/StaffAdd.jsx - COMPLETE UPDATED VERSION
 import React, { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { adminApi } from "../../services/adminApi.js";
+import validation from "../../../../utils/validation.js";
+import { getQualificationOptions } from "../../../../constants/qualifications.js";
 
 const StaffAdd = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState({});
   const [departments, setDepartments] = useState([]);
+  const [qualifications, setQualifications] = useState([]);
+  
   const [formData, setFormData] = useState({
     // Personal Information
     Name: "",
     Gender: "Male",
-    Date_of_Birth: "", // Added DOB field
+    Date_of_Birth: "",
     Blood_Group: "A+",
     
     // Contact Information
@@ -27,7 +31,7 @@ const StaffAdd = () => {
     
     // Professional Information
     Role: "Doctor",
-    Qualification: "",
+    Qualification: "", // Primary qualification (backward compatibility)
     Specialization: "",
     Experience: "",
     License_Number: "",
@@ -35,7 +39,7 @@ const StaffAdd = () => {
     Department: "",
     
     // Employment Details
-    Joining_Date: new Date().toISOString().split('T')[0], // Today's date
+    Joining_Date: new Date().toISOString().split('T')[0],
     Shift_Timing: "09:00 AM - 05:00 PM",
     Salary: "",
     
@@ -52,7 +56,6 @@ const StaffAdd = () => {
   const genderOptions = ["Male", "Female", "Other"];
   const bloodGroupOptions = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
   
-  // Roles WITH user accounts
   const rolesWithAccounts = [
     { value: "Doctor", label: "Doctor", canHaveAccount: true },
     { value: "Admin", label: "Admin", canHaveAccount: true },
@@ -61,7 +64,6 @@ const StaffAdd = () => {
     { value: "Pharmacist", label: "Pharmacist", canHaveAccount: true },
   ];
   
-  // Roles WITHOUT user accounts
   const rolesWithoutAccounts = [
     { value: "Nurse", label: "Nurse", canHaveAccount: false },
     { value: "Physiotherapist", label: "Physiotherapist", canHaveAccount: false },
@@ -84,9 +86,24 @@ const StaffAdd = () => {
     fetchDepartments();
   }, []);
 
+  const fetchDepartments = async () => {
+    try {
+      const response = await adminApi.getDepartments();
+      let departmentsData = [];
+      if (response.data) {
+        if (Array.isArray(response.data)) departmentsData = response.data;
+        else if (response.data.results) departmentsData = response.data.results;
+        else if (response.data.data) departmentsData = response.data.data;
+      }
+      setDepartments(departmentsData);
+    } catch (err) {
+      console.error("Error fetching departments:", err);
+    }
+  };
+
   // Calculate age from DOB
   const calculateAge = (dob) => {
-    if (!dob) return "";
+    if (!dob) return null;
     const birthDate = new Date(dob);
     const today = new Date();
     let age = today.getFullYear() - birthDate.getFullYear();
@@ -104,19 +121,54 @@ const StaffAdd = () => {
     return rolesWithAccountsList.includes(role);
   };
 
-  const fetchDepartments = async () => {
-    try {
-      const response = await adminApi.getDepartments();
-      let departmentsData = [];
-      if (response.data) {
-        if (Array.isArray(response.data)) departmentsData = response.data;
-        else if (response.data.results) departmentsData = response.data.results;
-        else if (response.data.data) departmentsData = response.data.data;
-      }
-      setDepartments(departmentsData);
-    } catch (err) {
-      console.error("Error fetching departments:", err);
+  // Handle field validation on change
+  const validateField = (name, value) => {
+    let validationResult = { valid: true, message: '' };
+
+    switch (name) {
+      case 'Name':
+        validationResult = validation.validateName(value);
+        break;
+      case 'Email':
+        validationResult = validation.validateEmail(value);
+        break;
+      case 'Phone_Number':
+      case 'Alternate_Phone':
+      case 'Emergency_Contact':
+        if (value) validationResult = validation.validatePhone(value);
+        break;
+      case 'Date_of_Birth':
+        validationResult = validation.validateDOB(value, formData.Role);
+        break;
+      case 'Pincode':
+        validationResult = validation.validatePincode(value);
+        break;
+      case 'IFSC_Code':
+        validationResult = validation.validateIFSC(value);
+        break;
+      case 'Account_Number':
+        validationResult = validation.validateAccountNumber(value);
+        break;
+      case 'Joining_Date':
+        validationResult = validation.validateJoiningDate(value);
+        break;
+      case 'Experience':
+        validationResult = validation.validateExperience(value, formData.Date_of_Birth, qualifications);
+        break;
+      case 'Consultation_fees':
+        validationResult = validation.validateConsultationFees(value, formData.Role);
+        break;
+      case 'Salary':
+        validationResult = validation.validateSalary(value);
+        break;
+      case 'License_Number':
+        validationResult = validation.validateLicenseNumber(value, formData.Role);
+        break;
+      default:
+        break;
     }
+
+    return validationResult;
   };
 
   const handleChange = (e) => {
@@ -131,13 +183,6 @@ const StaffAdd = () => {
     if (name === "Date_of_Birth") {
       const age = calculateAge(value);
       updatedData.Age = age;
-      
-      // Validate DOB (at least 18 years old)
-      if (age && age < 18) {
-        setError("Staff must be at least 18 years old");
-      } else {
-        setError("");
-      }
     }
     
     // Check if role change affects department requirement
@@ -150,152 +195,248 @@ const StaffAdd = () => {
       }
     }
     
-    // Validate Joining Date (cannot be in the past)
-    if (name === "Joining_Date") {
-      const selectedDate = new Date(value);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      
-      if (selectedDate < today) {
-        setError("Joining date cannot be in the past. It must be today or in the future.");
-      } else {
-        setError("");
+    setFormData(updatedData);
+    
+    // Validate field
+    const validationResult = validateField(name, value);
+    setFieldErrors(prev => ({
+      ...prev,
+      [name]: validationResult.valid ? null : validationResult.message
+    }));
+  };
+
+  // Qualification Management Functions
+  const addQualification = () => {
+    setQualifications([
+      ...qualifications,
+      {
+        id: Date.now(), // Temporary ID
+        qualification_name: "",
+        institution: "",
+        year_completed: new Date().getFullYear(),
+        specialization: "",
+        registration_number: "",
+        is_primary: qualifications.length === 0 // First one is primary
       }
+    ]);
+  };
+
+  const updateQualification = (index, field, value) => {
+    const updatedQualifications = [...qualifications];
+    updatedQualifications[index] = {
+      ...updatedQualifications[index],
+      [field]: value
+    };
+    
+    // If setting as primary, unset others
+    if (field === 'is_primary' && value) {
+      updatedQualifications.forEach((qual, i) => {
+        if (i !== index) {
+          updatedQualifications[i].is_primary = false;
+        }
+      });
     }
     
-    setFormData(updatedData);
+    setQualifications(updatedQualifications);
+  };
+
+  const removeQualification = (index) => {
+    const updatedQualifications = qualifications.filter((_, i) => i !== index);
+    // If we removed the primary, set first one as primary
+    if (qualifications[index].is_primary && updatedQualifications.length > 0) {
+      updatedQualifications[0].is_primary = true;
+    }
+    setQualifications(updatedQualifications);
+  };
+
+  const validateQualifications = () => {
+    const errors = [];
+    
+    qualifications.forEach((qual, index) => {
+      if (!qual.qualification_name || qual.qualification_name.trim() === '') {
+        errors.push(`Qualification ${index + 1}: Qualification name is required`);
+      }
+      
+      if (!qual.year_completed) {
+        errors.push(`Qualification ${index + 1}: Year completed is required`);
+      } else {
+        const currentYear = new Date().getFullYear();
+        if (qual.year_completed < 1950 || qual.year_completed > currentYear + 2) {
+          errors.push(`Qualification ${index + 1}: Year must be between 1950 and ${currentYear + 2}`);
+        }
+      }
+      
+      // If doctor and has registration number, validate format
+      if (formData.Role === 'Doctor' && qual.registration_number) {
+        const licenseValidation = validation.validateLicenseNumber(qual.registration_number, 'Doctor');
+        if (!licenseValidation.valid) {
+          errors.push(`Qualification ${index + 1}: ${licenseValidation.message}`);
+        }
+      }
+    });
+    
+    return errors;
   };
 
   const validateForm = () => {
     const errors = [];
-
-    // Required validations
-    if (!formData.Name.trim()) errors.push("Name is required");
-    if (!formData.Email) errors.push("Email is required");
-    if (!formData.Phone_Number) errors.push("Phone Number is required");
-    if (!formData.Role) errors.push("Role is required");
-    if (!formData.Date_of_Birth) errors.push("Date of Birth is required");
-
-    // Email validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (formData.Email && !emailRegex.test(formData.Email)) {
-      errors.push("Please enter a valid email address");
-    }
-
-    // Phone validation (10 digits starting with 6-9)
-    const phoneRegex = /^[6-9]\d{9}$/;
-    if (formData.Phone_Number && !phoneRegex.test(formData.Phone_Number)) {
-      errors.push("Phone number must start with 6-9 and be exactly 10 digits");
-    }
-
-    // Date of Birth validation (must be at least 18 years ago)
-    if (formData.Date_of_Birth) {
-      const dob = new Date(formData.Date_of_Birth);
-      const today = new Date();
-      const minBirthDate = new Date();
-      minBirthDate.setFullYear(today.getFullYear() - 18);
-      
-      if (dob > minBirthDate) {
-        errors.push("Staff member must be at least 18 years old");
-      }
-      
-      // Doctor-specific: at least 25 years old
-      if (formData.Role === "Doctor") {
-        const minDoctorBirthDate = new Date();
-        minDoctorBirthDate.setFullYear(today.getFullYear() - 25);
-        if (dob > minDoctorBirthDate) {
-          errors.push("Doctors must be at least 25 years old");
+    const newFieldErrors = {};
+    
+    // Validate all fields
+    Object.keys(formData).forEach(field => {
+      if (field !== 'Notes' && field !== 'Age') { // Skip optional fields
+        const validationResult = validateField(field, formData[field]);
+        if (!validationResult.valid) {
+          newFieldErrors[field] = validationResult.message;
+          errors.push(validationResult.message);
         }
       }
+    });
+    
+    // Validate qualifications
+    const qualificationErrors = validateQualifications();
+    if (qualificationErrors.length > 0) {
+      errors.push(...qualificationErrors);
     }
-
-    // Joining Date validation (cannot be in the past)
-    if (formData.Joining_Date) {
-      const joiningDate = new Date(formData.Joining_Date);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0); // Set to start of day for comparison
+    
+    // Role-specific validations
+    if (formData.Role === 'Doctor') {
+      if (!formData.Department) {
+        errors.push('Doctors must be assigned to a department');
+        newFieldErrors['Department'] = 'Doctors must be assigned to a department';
+      }
       
-      if (joiningDate < today) {
-        errors.push("Joining date cannot be in the past");
+      if (qualifications.length === 0 && !formData.Qualification) {
+        errors.push('Doctors must have at least one qualification');
       }
     }
-
-    // Doctor-specific validations
-    if (formData.Role === "Doctor") {
-      if (!formData.Department) errors.push("Doctors must be assigned to a department");
-      if (!formData.Qualification) errors.push("Qualification is required for doctors");
-      if (!formData.License_Number) errors.push("License number is required for doctors");
-      const fees = parseFloat(formData.Consultation_fees);
-      if (isNaN(fees) || fees <= 0) {
-        errors.push("Doctors must have consultation fees greater than 0");
-      }
-    }
-
-    // Salary validation
-    const salary = parseFloat(formData.Salary);
-    if (formData.Salary && (isNaN(salary) || salary < 0)) {
-      errors.push("Salary must be a valid positive number");
-    }
-
-    return errors;
+    
+    setFieldErrors(newFieldErrors);
+    
+    return {
+      valid: errors.length === 0,
+      errors: errors,
+      errorMessage: errors.join(', ')
+    };
   };
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setError("");
+  e.preventDefault();
+  
+  const validationResult = validateForm();
+  if (!validationResult.valid) {
+    alert(`Please fix the following errors:\n\n${validationResult.errorMessage}`);
+    return;
+  }
 
-    // Validate form
-    const validationErrors = validateForm();
-    if (validationErrors.length > 0) {
-      setError(validationErrors.join(", "));
-      setLoading(false);
-      return;
+  setLoading(true);
+
+  try {
+    // Prepare data for API
+    const submitData = { ...formData };
+    
+    // Remove Age field (backend will calculate it from DOB)
+    delete submitData.Age;
+    
+    // Convert numeric fields
+    if (submitData.Experience) submitData.Experience = parseInt(submitData.Experience);
+    if (submitData.Consultation_fees) submitData.Consultation_fees = parseFloat(submitData.Consultation_fees);
+    if (submitData.Salary) submitData.Salary = parseFloat(submitData.Salary);
+    
+    // Clear department for non-doctors
+    if (submitData.Role !== "Doctor") {
+      submitData.Department = null;
+      submitData.Consultation_fees = 0;
+      submitData.Specialization = "";
     }
 
-    try {
-      // Prepare data for API
-      const submitData = { ...formData };
+    // Add qualifications data
+    if (qualifications.length > 0) {
+      submitData.qualifications_data = qualifications.map(q => ({
+        qualification_name: q.qualification_name || '',
+        institution: q.institution || null,
+        year_completed: parseInt(q.year_completed) || new Date().getFullYear(),
+        specialization: q.specialization || null,
+        registration_number: q.registration_number || null,
+        is_primary: q.is_primary
+      }));
       
-      // Remove Age field (backend will calculate it from DOB)
-      delete submitData.Age;
-      
-      // Convert numeric fields
-      if (submitData.Experience) submitData.Experience = parseInt(submitData.Experience);
-      if (submitData.Consultation_fees) submitData.Consultation_fees = parseFloat(submitData.Consultation_fees);
-      if (submitData.Salary) submitData.Salary = parseFloat(submitData.Salary);
-      
-      // Clear department for non-doctors
-      if (submitData.Role !== "Doctor") {
-        submitData.Department = null;
-        submitData.Consultation_fees = 0;
-        submitData.Specialization = "";
+      // If we have qualifications_data, set the first primary qualification as the main Qualification field
+      const primaryQual = qualifications.find(q => q.is_primary);
+      if (primaryQual && primaryQual.qualification_name) {
+        submitData.Qualification = primaryQual.qualification_name;
+      } else if (qualifications[0] && qualifications[0].qualification_name) {
+        submitData.Qualification = qualifications[0].qualification_name;
       }
+    }
+    // If no qualifications array but we have Qualification field, keep it
+    else if (submitData.Qualification && submitData.Qualification.trim() !== '') {
+      // Keep Qualification field as a string
+      submitData.Qualification = submitData.Qualification.trim();
+    }
+    // If no qualifications at all and no Qualification field, at least set an empty string for doctors
+    else if (submitData.Role === 'Doctor') {
+      submitData.Qualification = ""; // Empty string instead of deleting
+    }
 
-      // Remove empty fields
-      Object.keys(submitData).forEach(key => {
-        if (submitData[key] === "" || submitData[key] === null || submitData[key] === undefined) {
+    // Remove empty fields - but NOT Qualification if it's empty string for doctors
+    Object.keys(submitData).forEach(key => {
+      if (submitData[key] === "" || submitData[key] === null || submitData[key] === undefined) {
+        // For doctors, keep empty Qualification string
+        if (key === 'Qualification' && submitData.Role === 'Doctor') {
+          submitData[key] = "";
+        } else {
           delete submitData[key];
         }
-      });
+      }
+    });
 
-      console.log("Submitting data:", submitData);
-      const response = await adminApi.createStaff(submitData);
+    // DEBUG: Log what we're sending
+    console.log("📤 SENDING DATA:", JSON.stringify(submitData, null, 2));
+    console.log("Has Qualification?", 'Qualification' in submitData);
+    console.log("Qualification value:", submitData.Qualification);
+    console.log("Has qualifications_data?", 'qualifications_data' in submitData);
+    
+    const response = await adminApi.createStaff(submitData);
+    
+    alert("Staff added successfully!");
+    navigate("/admin/staff");
+    
+  } catch (err) {
+    console.error("❌ ERROR DETAILS:", err);
+    
+    if (err.response) {
+      console.error("🔴 RESPONSE DATA:", err.response.data);
       
-      alert("Staff added successfully!");
-      navigate("/admin/staff");
+      // Show detailed error
+      let errorMessage = "Failed to add staff.\n\n";
       
-    } catch (err) {
-      console.error("Error adding staff:", err);
-      const errorMessage = err.response?.data?.error || 
-                          err.response?.data?.message || 
-                          err.message || 
-                          "Failed to add staff. Please try again.";
-      setError(errorMessage);
-    } finally {
-      setLoading(false);
+      if (err.response.data) {
+        if (typeof err.response.data === 'string') {
+          errorMessage += err.response.data;
+        } else if (typeof err.response.data === 'object') {
+          Object.keys(err.response.data).forEach(key => {
+            if (Array.isArray(err.response.data[key])) {
+              errorMessage += `• ${key}: ${err.response.data[key].join(', ')}\n`;
+            } else {
+              errorMessage += `• ${key}: ${JSON.stringify(err.response.data[key])}\n`;
+            }
+          });
+        }
+      }
+      
+      alert(errorMessage);
+    } else {
+      alert(`Error: ${err.message || "Failed to add staff. Please try again."}`);
     }
-  };
+  } finally {
+    setLoading(false);
+  }
+};
+
+
+  // Get qualification options for current role
+  const currentQualificationOptions = getQualificationOptions(formData.Role);
 
   return (
     <div className="staff-add">
@@ -308,13 +449,6 @@ const StaffAdd = () => {
           <i className="bi bi-arrow-left me-1"></i>Back to List
         </Link>
       </div>
-
-      {error && (
-        <div className="alert alert-danger mb-4">
-          <i className="bi bi-exclamation-triangle me-2"></i>
-          {error}
-        </div>
-      )}
 
       <form onSubmit={handleSubmit}>
         <div className="row">
@@ -331,8 +465,16 @@ const StaffAdd = () => {
                 <div className="row">
                   <div className="col-md-6 mb-3">
                     <label className="form-label">Full Name *</label>
-                    <input type="text" className="form-control" name="Name" 
-                      value={formData.Name} onChange={handleChange} required />
+                    <input 
+                      type="text" 
+                      className={`form-control ${fieldErrors.Name ? 'is-invalid' : ''}`} 
+                      name="Name" 
+                      value={formData.Name} 
+                      onChange={handleChange} 
+                    />
+                    {fieldErrors.Name && (
+                      <div className="invalid-feedback d-block">{fieldErrors.Name}</div>
+                    )}
                   </div>
 
                   <div className="col-md-3 mb-3">
@@ -349,16 +491,19 @@ const StaffAdd = () => {
                     <label className="form-label">Date of Birth *</label>
                     <input 
                       type="date" 
-                      className="form-control" 
+                      className={`form-control ${fieldErrors.Date_of_Birth ? 'is-invalid' : ''}`}
                       name="Date_of_Birth" 
                       value={formData.Date_of_Birth} 
                       onChange={handleChange} 
                       max={new Date(new Date().setFullYear(new Date().getFullYear() - 18)).toISOString().split('T')[0]}
-                      required 
                     />
-                    <small className="text-muted">
-                      {formData.Age ? `Age: ${formData.Age} years` : "Must be at least 18 years old"}
-                    </small>
+                    {fieldErrors.Date_of_Birth ? (
+                      <div className="invalid-feedback d-block">{fieldErrors.Date_of_Birth}</div>
+                    ) : (
+                      <small className="text-muted">
+                        {calculateAge(formData.Date_of_Birth) ? `Age: ${calculateAge(formData.Date_of_Birth)} years` : "Must be at least 18 years old"}
+                      </small>
+                    )}
                   </div>
 
                   <div className="col-md-4 mb-3">
@@ -388,57 +533,113 @@ const StaffAdd = () => {
                 <div className="row">
                   <div className="col-md-6 mb-3">
                     <label className="form-label">Email Address *</label>
-                    <input type="email" className="form-control" name="Email" 
-                      value={formData.Email} onChange={handleChange} required />
+                    <input 
+                      type="email" 
+                      className={`form-control ${fieldErrors.Email ? 'is-invalid' : ''}`}
+                      name="Email" 
+                      value={formData.Email} 
+                      onChange={handleChange}
+                    />
+                    {fieldErrors.Email && (
+                      <div className="invalid-feedback d-block">{fieldErrors.Email}</div>
+                    )}
                   </div>
 
                   <div className="col-md-6 mb-3">
                     <label className="form-label">Phone Number *</label>
-                    <input type="tel" className="form-control" name="Phone_Number" 
-                      value={formData.Phone_Number} onChange={handleChange} 
-                      pattern="[6-9]\d{9}" maxLength="10" required 
-                      title="Phone must start with 6-9 and be 10 digits" />
+                    <input 
+                      type="tel" 
+                      className={`form-control ${fieldErrors.Phone_Number ? 'is-invalid' : ''}`}
+                      name="Phone_Number" 
+                      value={formData.Phone_Number} 
+                      onChange={handleChange}
+                      maxLength="10"
+                      placeholder="e.g., 9876543210"
+                    />
+                    {fieldErrors.Phone_Number && (
+                      <div className="invalid-feedback d-block">{fieldErrors.Phone_Number}</div>
+                    )}
                   </div>
 
                   <div className="col-md-6 mb-3">
                     <label className="form-label">Alternate Phone</label>
-                    <input type="tel" className="form-control" name="Alternate_Phone" 
-                      value={formData.Alternate_Phone} onChange={handleChange} 
-                      pattern="[6-9]\d{9}" maxLength="10" 
-                      title="Phone must start with 6-9 and be 10 digits" />
+                    <input 
+                      type="tel" 
+                      className={`form-control ${fieldErrors.Alternate_Phone ? 'is-invalid' : ''}`}
+                      name="Alternate_Phone" 
+                      value={formData.Alternate_Phone} 
+                      onChange={handleChange}
+                      maxLength="10"
+                      placeholder="e.g., 9876543210"
+                    />
+                    {fieldErrors.Alternate_Phone && (
+                      <div className="invalid-feedback d-block">{fieldErrors.Alternate_Phone}</div>
+                    )}
                   </div>
 
                   <div className="col-md-6 mb-3">
                     <label className="form-label">Emergency Contact</label>
-                    <input type="tel" className="form-control" name="Emergency_Contact" 
-                      value={formData.Emergency_Contact} onChange={handleChange} 
-                      pattern="[6-9]\d{9}" maxLength="10" 
-                      title="Phone must start with 6-9 and be 10 digits" />
+                    <input 
+                      type="tel" 
+                      className={`form-control ${fieldErrors.Emergency_Contact ? 'is-invalid' : ''}`}
+                      name="Emergency_Contact" 
+                      value={formData.Emergency_Contact} 
+                      onChange={handleChange}
+                      maxLength="10"
+                      placeholder="e.g., 9876543210"
+                    />
+                    {fieldErrors.Emergency_Contact && (
+                      <div className="invalid-feedback d-block">{fieldErrors.Emergency_Contact}</div>
+                    )}
                   </div>
 
                   <div className="col-12 mb-3">
                     <label className="form-label">Address *</label>
-                    <textarea className="form-control" name="Address" rows="3" 
-                      value={formData.Address} onChange={handleChange} required />
+                    <textarea 
+                      className="form-control" 
+                      name="Address" 
+                      rows="3" 
+                      value={formData.Address} 
+                      onChange={handleChange} 
+                    />
                   </div>
 
                   <div className="col-md-4 mb-3">
                     <label className="form-label">City</label>
-                    <input type="text" className="form-control" name="City" 
-                      value={formData.City} onChange={handleChange} />
+                    <input 
+                      type="text" 
+                      className="form-control" 
+                      name="City" 
+                      value={formData.City} 
+                      onChange={handleChange} 
+                    />
                   </div>
 
                   <div className="col-md-4 mb-3">
                     <label className="form-label">State</label>
-                    <input type="text" className="form-control" name="State" 
-                      value={formData.State} onChange={handleChange} />
+                    <input 
+                      type="text" 
+                      className="form-control" 
+                      name="State" 
+                      value={formData.State} 
+                      onChange={handleChange} 
+                    />
                   </div>
 
                   <div className="col-md-4 mb-3">
                     <label className="form-label">Pincode</label>
-                    <input type="text" className="form-control" name="Pincode" 
-                      value={formData.Pincode} onChange={handleChange} pattern="\d{6}" maxLength="6" 
-                      title="6-digit pincode" />
+                    <input 
+                      type="text" 
+                      className={`form-control ${fieldErrors.Pincode ? 'is-invalid' : ''}`}
+                      name="Pincode" 
+                      value={formData.Pincode} 
+                      onChange={handleChange} 
+                      maxLength="6"
+                      placeholder="6-digit pincode"
+                    />
+                    {fieldErrors.Pincode && (
+                      <div className="invalid-feedback d-block">{fieldErrors.Pincode}</div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -458,9 +659,12 @@ const StaffAdd = () => {
                 <div className="row">
                   <div className="col-md-6 mb-3">
                     <label className="form-label">Role *</label>
-                    <select className="form-select" name="Role" 
-                      value={formData.Role} onChange={handleChange} required>
-                      {/* Roles with user accounts */}
+                    <select 
+                      className="form-select" 
+                      name="Role" 
+                      value={formData.Role} 
+                      onChange={handleChange}
+                    >
                       <optgroup label="Roles with User Accounts">
                         {rolesWithAccounts.map(option => (
                           <option key={option.value} value={option.value}>
@@ -468,7 +672,6 @@ const StaffAdd = () => {
                           </option>
                         ))}
                       </optgroup>
-                      {/* Roles without user accounts */}
                       <optgroup label="Other Roles (No User Account)">
                         {rolesWithoutAccounts.map(option => (
                           <option key={option.value} value={option.value}>
@@ -488,45 +691,86 @@ const StaffAdd = () => {
                   </div>
 
                   <div className="col-md-6 mb-3">
-                    <label className="form-label">Qualification</label>
-                    <input type="text" className="form-control" name="Qualification" 
-                      value={formData.Qualification} onChange={handleChange} 
-                      required={formData.Role === "Doctor"} />
-                  </div>
-
-                  <div className="col-md-6 mb-3">
                     <label className="form-label">Specialization</label>
-                    <input type="text" className="form-control" name="Specialization" 
-                      value={formData.Specialization} onChange={handleChange} />
+                    <input 
+                      type="text" 
+                      className="form-control" 
+                      name="Specialization" 
+                      value={formData.Specialization} 
+                      onChange={handleChange} 
+                      placeholder="e.g., Cardiology, Pediatrics, Retail Pharmacy"
+                    />
                   </div>
 
                   <div className="col-md-6 mb-3">
                     <label className="form-label">Experience (Years)</label>
-                    <input type="number" className="form-control" name="Experience" 
-                      value={formData.Experience} onChange={handleChange} min="0" max="50" />
+                    <input 
+                      type="number" 
+                      className={`form-control ${fieldErrors.Experience ? 'is-invalid' : ''}`}
+                      name="Experience" 
+                      value={formData.Experience} 
+                      onChange={handleChange} 
+                      min="0" 
+                      max="50"
+                    />
+                    {fieldErrors.Experience && (
+                      <div className="invalid-feedback d-block">{fieldErrors.Experience}</div>
+                    )}
                   </div>
 
                   <div className="col-md-6 mb-3">
-                    <label className="form-label">License Number</label>
-                    <input type="text" className="form-control" name="License_Number" 
-                      value={formData.License_Number} onChange={handleChange} 
-                      required={formData.Role === "Doctor"} />
+                    <label className="form-label">License Number {formData.Role === 'Doctor' && '*'}</label>
+                    <input 
+                      type="text" 
+                      className={`form-control ${fieldErrors.License_Number ? 'is-invalid' : ''}`}
+                      name="License_Number" 
+                      value={formData.License_Number} 
+                      onChange={handleChange} 
+                      placeholder={
+                        formData.Role === 'Doctor' ? 'e.g., 123456 or TN/12345/2010' :
+                        formData.Role === 'Pharmacist' ? 'e.g., PCI-12345 or KA/1234/2015' :
+                        formData.Role === 'Lab Technician' ? 'e.g., DMLT-1234' :
+                        'License number if applicable'
+                      }
+                    />
+                    {fieldErrors.License_Number ? (
+                      <div className="invalid-feedback d-block">{fieldErrors.License_Number}</div>
+                    ) : (
+                      <small className="text-muted">
+                        {formData.Role === 'Doctor' && 'Format: 123456 (MCI) or State/Number/Year'}
+                        {formData.Role === 'Pharmacist' && 'Format: PCI-12345 or State/Number/Year'}
+                        {formData.Role === 'Lab Technician' && 'Format: DMLT-1234 or State/LT/Number'}
+                      </small>
+                    )}
                   </div>
 
                   {formData.Role === "Doctor" && (
                     <>
                       <div className="col-md-6 mb-3">
                         <label className="form-label">Consultation Fees (₹) *</label>
-                        <input type="number" className="form-control" name="Consultation_fees" 
-                          value={formData.Consultation_fees} onChange={handleChange} 
-                          min="0" step="0.01" required />
+                        <input 
+                          type="number" 
+                          className={`form-control ${fieldErrors.Consultation_fees ? 'is-invalid' : ''}`}
+                          name="Consultation_fees" 
+                          value={formData.Consultation_fees} 
+                          onChange={handleChange} 
+                          min="0" 
+                          step="0.01"
+                          placeholder="e.g., 500"
+                        />
+                        {fieldErrors.Consultation_fees && (
+                          <div className="invalid-feedback d-block">{fieldErrors.Consultation_fees}</div>
+                        )}
                       </div>
 
                       <div className="col-md-6 mb-3">
                         <label className="form-label">Department *</label>
-                        <select className="form-select" name="Department" 
-                          value={formData.Department} onChange={handleChange} 
-                          required={formData.Role === "Doctor"}>
+                        <select 
+                          className={`form-control ${fieldErrors.Department ? 'is-invalid' : ''}`}
+                          name="Department" 
+                          value={formData.Department} 
+                          onChange={handleChange}
+                        >
                           <option value="">Select Department</option>
                           {departments.map(dept => (
                             <option key={dept.DEPT_ID || dept.id} value={dept.DEPT_ID || dept.id}>
@@ -534,10 +778,153 @@ const StaffAdd = () => {
                             </option>
                           ))}
                         </select>
+                        {fieldErrors.Department && (
+                          <div className="invalid-feedback d-block">{fieldErrors.Department}</div>
+                        )}
                       </div>
                     </>
                   )}
                 </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ============= QUALIFICATIONS SECTION ============= */}
+          <div className="col-12">
+            <div className="card shadow-sm border-0 mb-4">
+              <div className="card-header bg-light d-flex justify-content-between align-items-center">
+                <h5 className="mb-0">
+                  <i className="bi bi-award me-2"></i>
+                  Qualifications
+                </h5>
+                <button 
+                  type="button" 
+                  className="btn btn-sm btn-outline-primary"
+                  onClick={addQualification}
+                >
+                  <i className="bi bi-plus-lg me-1"></i>Add Qualification
+                </button>
+              </div>
+              <div className="card-body">
+                {qualifications.length === 0 ? (
+                  <div className="text-center py-4 text-muted">
+                    <i className="bi bi-award display-4 mb-3"></i>
+                    <p>No qualifications added yet. Click "Add Qualification" to add.</p>
+                  </div>
+                ) : (
+                  qualifications.map((qual, index) => (
+                    <div key={qual.id} className="qualification-card border p-3 mb-3 rounded">
+                      <div className="d-flex justify-content-between align-items-center mb-2">
+                        <h6 className="mb-0">
+                          Qualification #{index + 1}
+                          {qual.is_primary && (
+                            <span className="badge bg-primary ms-2">Primary</span>
+                          )}
+                        </h6>
+                        <div>
+                          <button 
+                            type="button" 
+                            className="btn btn-sm btn-outline-primary me-2"
+                            onClick={() => updateQualification(index, 'is_primary', true)}
+                            disabled={qual.is_primary}
+                          >
+                            {qual.is_primary ? 'Primary' : 'Set as Primary'}
+                          </button>
+                          <button 
+                            type="button" 
+                            className="btn btn-sm btn-outline-danger"
+                            onClick={() => removeQualification(index)}
+                            disabled={qualifications.length === 1}
+                          >
+                            <i className="bi bi-trash"></i>
+                          </button>
+                        </div>
+                      </div>
+                      
+                      <div className="row">
+                        <div className="col-md-6 mb-3">
+                          <label className="form-label">Qualification Name *</label>
+                          <select 
+                            className="form-select"
+                            value={qual.qualification_name}
+                            onChange={(e) => updateQualification(index, 'qualification_name', e.target.value)}
+                          >
+                            <option value="">Select Qualification</option>
+                            {currentQualificationOptions.map(option => (
+                              <option key={option} value={option}>{option}</option>
+                            ))}
+                          </select>
+                        </div>
+                        
+                        <div className="col-md-6 mb-3">
+                          <label className="form-label">Institution/University</label>
+                          <input 
+                            type="text"
+                            className="form-control"
+                            value={qual.institution}
+                            onChange={(e) => updateQualification(index, 'institution', e.target.value)}
+                            placeholder="e.g., AIIMS Delhi, University of Mumbai"
+                          />
+                        </div>
+                        
+                        <div className="col-md-4 mb-3">
+                          <label className="form-label">Year Completed *</label>
+                          <input 
+                            type="number"
+                            className="form-control"
+                            value={qual.year_completed}
+                            onChange={(e) => updateQualification(index, 'year_completed', parseInt(e.target.value))}
+                            min="1950"
+                            max={new Date().getFullYear() + 2}
+                          />
+                        </div>
+                        
+                        <div className="col-md-4 mb-3">
+                          <label className="form-label">Specialization</label>
+                          <input 
+                            type="text"
+                            className="form-control"
+                            value={qual.specialization}
+                            onChange={(e) => updateQualification(index, 'specialization', e.target.value)}
+                            placeholder="e.g., Cardiology, Pediatrics"
+                          />
+                        </div>
+                        
+                        <div className="col-md-4 mb-3">
+                          <label className="form-label">Registration Number</label>
+                          <input 
+                            type="text"
+                            className="form-control"
+                            value={qual.registration_number}
+                            onChange={(e) => updateQualification(index, 'registration_number', e.target.value)}
+                            placeholder={formData.Role === 'Doctor' ? 'e.g., TN/12345/2010' : 
+                                       formData.Role === 'Pharmacist' ? 'e.g., PCI-12345' : 
+                                       'e.g., DMLT-1234'}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+                
+                {/* Legacy qualification field for backward compatibility */}
+                {qualifications.length === 0 && (
+                  <div className="mb-3">
+                    <label className="form-label">Primary Qualification (Legacy Field)</label>
+                    <input 
+                      type="text" 
+                      className="form-control" 
+                      name="Qualification" 
+                      value={formData.Qualification} 
+                      onChange={handleChange} 
+                      placeholder="e.g., MBBS, B.Pharm, DMLT"
+                    />
+                    <small className="text-muted">
+                      <i className="bi bi-info-circle me-1"></i>
+                      It's recommended to use the Qualifications section above for multiple qualifications.
+                    </small>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -557,13 +944,15 @@ const StaffAdd = () => {
                     <label className="form-label">Joining Date *</label>
                     <input 
                       type="date" 
-                      className="form-control" 
+                      className={`form-control ${fieldErrors.Joining_Date ? 'is-invalid' : ''}`}
                       name="Joining_Date" 
                       value={formData.Joining_Date} 
                       onChange={handleChange} 
-                      min={new Date().toISOString().split('T')[0]} // Cannot select past dates
-                      required 
+                      min={new Date().toISOString().split('T')[0]}
                     />
+                    {fieldErrors.Joining_Date && (
+                      <div className="invalid-feedback d-block">{fieldErrors.Joining_Date}</div>
+                    )}
                     <small className="text-muted">Cannot be in the past</small>
                   </div>
 
@@ -579,8 +968,19 @@ const StaffAdd = () => {
 
                   <div className="col-md-4 mb-3">
                     <label className="form-label">Salary (₹)</label>
-                    <input type="number" className="form-control" name="Salary" 
-                      value={formData.Salary} onChange={handleChange} min="0" step="0.01" />
+                    <input 
+                      type="number" 
+                      className={`form-control ${fieldErrors.Salary ? 'is-invalid' : ''}`}
+                      name="Salary" 
+                      value={formData.Salary} 
+                      onChange={handleChange} 
+                      min="0" 
+                      step="0.01"
+                      placeholder="e.g., 50000"
+                    />
+                    {fieldErrors.Salary && (
+                      <div className="invalid-feedback d-block">{fieldErrors.Salary}</div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -600,22 +1000,44 @@ const StaffAdd = () => {
                 <div className="row">
                   <div className="col-md-6 mb-3">
                     <label className="form-label">Bank Name</label>
-                    <input type="text" className="form-control" name="Bank_Name" 
-                      value={formData.Bank_Name} onChange={handleChange} />
+                    <input 
+                      type="text" 
+                      className="form-control" 
+                      name="Bank_Name" 
+                      value={formData.Bank_Name} 
+                      onChange={handleChange} 
+                      placeholder="e.g., State Bank of India"
+                    />
                   </div>
 
                   <div className="col-md-6 mb-3">
                     <label className="form-label">Account Number</label>
-                    <input type="text" className="form-control" name="Account_Number" 
-                      value={formData.Account_Number} onChange={handleChange} 
-                      pattern="\d{9,18}" title="9-18 digit account number" />
+                    <input 
+                      type="text" 
+                      className={`form-control ${fieldErrors.Account_Number ? 'is-invalid' : ''}`}
+                      name="Account_Number" 
+                      value={formData.Account_Number} 
+                      onChange={handleChange} 
+                      placeholder="9-18 digit account number"
+                    />
+                    {fieldErrors.Account_Number && (
+                      <div className="invalid-feedback d-block">{fieldErrors.Account_Number}</div>
+                    )}
                   </div>
 
                   <div className="col-md-6 mb-3">
                     <label className="form-label">IFSC Code</label>
-                    <input type="text" className="form-control" name="IFSC_Code" 
-                      value={formData.IFSC_Code} onChange={handleChange} 
-                      pattern="[A-Z]{4}0[A-Z0-9]{6}" title="Format: ABCD0123456" />
+                    <input 
+                      type="text" 
+                      className={`form-control ${fieldErrors.IFSC_Code ? 'is-invalid' : ''}`}
+                      name="IFSC_Code" 
+                      value={formData.IFSC_Code} 
+                      onChange={handleChange} 
+                      placeholder="e.g., SBIN0001234"
+                    />
+                    {fieldErrors.IFSC_Code && (
+                      <div className="invalid-feedback d-block">{fieldErrors.IFSC_Code}</div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -635,9 +1057,14 @@ const StaffAdd = () => {
                 <div className="row">
                   <div className="col-12 mb-3">
                     <label className="form-label">Notes</label>
-                    <textarea className="form-control" name="Notes" rows="4" 
-                      value={formData.Notes} onChange={handleChange} 
-                      placeholder="Any additional notes or remarks..." />
+                    <textarea 
+                      className="form-control" 
+                      name="Notes" 
+                      rows="4" 
+                      value={formData.Notes} 
+                      onChange={handleChange} 
+                      placeholder="Any additional notes or remarks..."
+                    />
                   </div>
                 </div>
               </div>

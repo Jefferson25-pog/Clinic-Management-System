@@ -1,18 +1,20 @@
-from rest_framework import viewsets, status
+# doctorapp/views.py - COMPLETE FIXED VERSION
+from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, BasePermission
 from .models import ConsultationDetail, Prescription, LabTestRequestDetail
 from .serializers import ConsultationDetailsSerializer, PrescriptionSerializer, LabTestsSerializer, LabTestRequestDetailsSerializer
-from receptionistapp.models import AppointmentDetail
-from receptionistapp.serializers import AppointmentDetailsSerializer
+from receptionistapp.models import AppointmentDetail, PatientDetail
+from receptionistapp.serializers import AppointmentDetailsSerializer, PatientDetailsSerializer
 from pharmacistapp.models import StockDetails, MedicineDetail
 from pharmacistapp.serializers import MedicineDetailsSerializer
-from rest_framework import serializers
 from labtechapp.models import LabTest, LabTestResult
 from labtechapp.serializers import LabTestResultsSerializer
 from django.utils import timezone
-from datetime import datetime, timedelta,date
+from django.db.models import Q
+from datetime import datetime, timedelta, date
+from authentication.models import SystemLog
 
 class IsDoctorUser(BasePermission):
     def has_permission(self, request, view):
@@ -20,7 +22,7 @@ class IsDoctorUser(BasePermission):
             return False
         if request.user.is_superuser:
             return True
-        if hasattr(request.user, 'staff_detail'):  # FIXED: staff_detail
+        if hasattr(request.user, 'staff_detail'):
             return request.user.staff_detail.Role == 'Doctor'
         return False
 
@@ -30,10 +32,11 @@ class IsAdminUser(BasePermission):
             return False
         if request.user.is_superuser:
             return True
-        if hasattr(request.user, 'staff_detail'):  # FIXED: staff_detail
+        if hasattr(request.user, 'staff_detail'):
             return request.user.staff_detail.Role == 'Admin'
         return False
 
+# ============= APPOINTMENTS =============
 class AppointmentDetailsViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = AppointmentDetail.objects.all()
     serializer_class = AppointmentDetailsSerializer
@@ -42,8 +45,8 @@ class AppointmentDetailsViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=['get'])
     def my_appointments(self, request):
         """Get all appointments for the current doctor"""
-        if hasattr(request.user, 'staff_detail') and request.user.staff_detail.Role == 'Doctor':  # FIXED
-            doctor_id = request.user.staff_detail.STAFF_ID  # FIXED
+        if hasattr(request.user, 'staff_detail') and request.user.staff_detail.Role == 'Doctor':
+            doctor_id = request.user.staff_detail.STAFF_ID
             appointments = AppointmentDetail.objects.filter(DOC_ID=doctor_id)
             serializer = self.get_serializer(appointments, many=True)
             return Response(serializer.data)
@@ -52,15 +55,15 @@ class AppointmentDetailsViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=['get'])
     def today_appointments(self, request):
         """Get today's appointments for the current doctor"""
-        if hasattr(request.user, 'staff_detail') and request.user.staff_detail.Role == 'Doctor':  # FIXED
-            doctor_id = request.user.staff_detail.STAFF_ID  # FIXED
+        if hasattr(request.user, 'staff_detail') and request.user.staff_detail.Role == 'Doctor':
+            doctor_id = request.user.staff_detail.STAFF_ID
             today = timezone.now().date()
             
             today_appointments = AppointmentDetail.objects.filter(
                 DOC_ID=doctor_id,
                 Date=today,
                 Status__in=['Scheduled', 'Completed']
-            ).order_by('Date')
+            ).order_by('Date', 'Time')
             
             serializer = self.get_serializer(today_appointments, many=True)
             return Response({
@@ -73,15 +76,15 @@ class AppointmentDetailsViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=['get'])
     def upcoming_appointments(self, request):
         """Get upcoming appointments (today and future) for the current doctor"""
-        if hasattr(request.user, 'staff_detail') and request.user.staff_detail.Role == 'Doctor':  # FIXED
-            doctor_id = request.user.staff_detail.STAFF_ID  # FIXED
+        if hasattr(request.user, 'staff_detail') and request.user.staff_detail.Role == 'Doctor':
+            doctor_id = request.user.staff_detail.STAFF_ID
             today = timezone.now().date()
             
             upcoming_appointments = AppointmentDetail.objects.filter(
                 DOC_ID=doctor_id,
                 Date__gte=today,
                 Status='Scheduled'
-            ).order_by('Date')
+            ).order_by('Date', 'Time')
             
             serializer = self.get_serializer(upcoming_appointments, many=True)
             return Response(serializer.data)
@@ -90,7 +93,7 @@ class AppointmentDetailsViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=True, methods=['post'])
     def update_status(self, request, pk=None):
         """Update appointment status (Scheduled → Completed/Cancelled)"""
-        if hasattr(request.user, 'staff_detail') and request.user.staff_detail.Role == 'Doctor':  # FIXED
+        if hasattr(request.user, 'staff_detail') and request.user.staff_detail.Role == 'Doctor':
             try:
                 appointment = self.get_object()
                 new_status = request.data.get('status')
@@ -118,7 +121,7 @@ class AppointmentDetailsViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=True, methods=['post'])
     def mark_completed(self, request, pk=None):
         """Mark appointment as completed (convenience method)"""
-        if hasattr(request.user, 'staff_detail') and request.user.staff_detail.Role == 'Doctor':  # FIXED
+        if hasattr(request.user, 'staff_detail') and request.user.staff_detail.Role == 'Doctor':
             try:
                 appointment = self.get_object()
                 
@@ -135,6 +138,7 @@ class AppointmentDetailsViewSet(viewsets.ReadOnlyModelViewSet):
                 return Response({'error': 'Appointment not found'}, status=status.HTTP_404_NOT_FOUND)
         return Response({'error': 'Doctor not found'}, status=status.HTTP_404_NOT_FOUND)
 
+# ============= CONSULTATIONS =============
 class ConsultationDetailsViewSet(viewsets.ModelViewSet):
     queryset = ConsultationDetail.objects.all()
     serializer_class = ConsultationDetailsSerializer
@@ -142,8 +146,8 @@ class ConsultationDetailsViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Doctors can only see their own consultations"""
-        if hasattr(self.request.user, 'staff_detail'):  # FIXED
-            doctor_id = self.request.user.staff_detail.STAFF_ID  # FIXED
+        if hasattr(self.request.user, 'staff_detail'):
+            doctor_id = self.request.user.staff_detail.STAFF_ID
             return ConsultationDetail.objects.filter(DOC_ID=doctor_id)
         return ConsultationDetail.objects.none()
 
@@ -162,8 +166,8 @@ class ConsultationDetailsViewSet(viewsets.ModelViewSet):
             consultation_data = request.data.copy()
             consultation_data['TOKEN_NO'] = pk
             
-            if hasattr(request.user, 'staff_detail') and request.user.staff_detail.Role == 'Doctor':  # FIXED
-                consultation_data['DOC_ID'] = request.user.staff_detail.STAFF_ID  # FIXED
+            if hasattr(request.user, 'staff_detail') and request.user.staff_detail.Role == 'Doctor':
+                consultation_data['DOC_ID'] = request.user.staff_detail.STAFF_ID
             
             serializer = self.get_serializer(data=consultation_data)
             if serializer.is_valid():
@@ -184,8 +188,8 @@ class ConsultationDetailsViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def consultation_history(self, request):
         """Get consultation history for the current doctor with filtering options"""
-        if hasattr(request.user, 'staff_detail') and request.user.staff_detail.Role == 'Doctor':  # FIXED
-            doctor_id = request.user.staff_detail.STAFF_ID  # FIXED
+        if hasattr(request.user, 'staff_detail') and request.user.staff_detail.Role == 'Doctor':
+            doctor_id = request.user.staff_detail.STAFF_ID
             
             patient_name = request.query_params.get('patient_name', None)
             date_from = request.query_params.get('date_from', None)
@@ -240,8 +244,8 @@ class ConsultationDetailsViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def recent_consultations(self, request):
         """Get recent consultations (last 30 days) for the current doctor"""
-        if hasattr(request.user, 'staff_detail') and request.user.staff_detail.Role == 'Doctor':  # FIXED
-            doctor_id = request.user.staff_detail.STAFF_ID  # FIXED
+        if hasattr(request.user, 'staff_detail') and request.user.staff_detail.Role == 'Doctor':
+            doctor_id = request.user.staff_detail.STAFF_ID
             thirty_days_ago = timezone.now() - timedelta(days=30)
             
             recent_consultations = ConsultationDetail.objects.filter(
@@ -260,8 +264,8 @@ class ConsultationDetailsViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def today_consultations(self, request):
         """Get today's consultations for the current doctor"""
-        if hasattr(request.user, 'staff_detail') and request.user.staff_detail.Role == 'Doctor':  # FIXED
-            doctor_id = request.user.staff_detail.STAFF_ID  # FIXED
+        if hasattr(request.user, 'staff_detail') and request.user.staff_detail.Role == 'Doctor':
+            doctor_id = request.user.staff_detail.STAFF_ID
             today = timezone.now().date()
             
             today_consultations = ConsultationDetail.objects.filter(
@@ -277,6 +281,7 @@ class ConsultationDetailsViewSet(viewsets.ModelViewSet):
             })
         return Response([])
 
+# ============= PRESCRIPTIONS =============
 class PrescriptionViewSet(viewsets.ModelViewSet):
     queryset = Prescription.objects.all()
     serializer_class = PrescriptionSerializer
@@ -284,8 +289,8 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Doctors can only see prescriptions from their consultations"""
-        if hasattr(self.request.user, 'staff_detail'):  # FIXED
-            doctor_id = self.request.user.staff_detail.STAFF_ID  # FIXED
+        if hasattr(self.request.user, 'staff_detail'):
+            doctor_id = self.request.user.staff_detail.STAFF_ID
             return Prescription.objects.filter(CONSULT_ID__DOC_ID=doctor_id)
         return Prescription.objects.none()
 
@@ -294,8 +299,8 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
         """Get all prescriptions for a specific patient"""
         patient_id = request.query_params.get('patient_id', None)
         
-        if hasattr(request.user, 'staff_detail') and request.user.staff_detail.Role == 'Doctor':  # FIXED
-            doctor_id = request.user.staff_detail.STAFF_ID  # FIXED
+        if hasattr(request.user, 'staff_detail') and request.user.staff_detail.Role == 'Doctor':
+            doctor_id = request.user.staff_detail.STAFF_ID
             
             if patient_id:
                 prescriptions = Prescription.objects.filter(
@@ -309,11 +314,13 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
                 return Response({'error': 'patient_id parameter is required'}, status=status.HTTP_400_BAD_REQUEST)
         return Response([])
 
+# ============= LAB TESTS =============
 class LabTestsViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = LabTest.objects.all()
     serializer_class = LabTestsSerializer
     permission_classes = [IsAuthenticated, IsDoctorUser | IsAdminUser]
 
+# ============= LAB TEST REQUESTS =============
 class LabTestRequestViewSet(viewsets.ModelViewSet):
     queryset = LabTestRequestDetail.objects.all()
     serializer_class = LabTestRequestDetailsSerializer
@@ -321,8 +328,8 @@ class LabTestRequestViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         """Doctors can only see their own lab test requests"""
-        if hasattr(self.request.user, 'staff_detail'):  # FIXED
-            doctor_id = self.request.user.staff_detail.STAFF_ID  # FIXED
+        if hasattr(self.request.user, 'staff_detail'):
+            doctor_id = self.request.user.staff_detail.STAFF_ID
             return LabTestRequestDetail.objects.filter(CONSULT_ID__DOC_ID=doctor_id)
         return LabTestRequestDetail.objects.none()
     
@@ -330,8 +337,9 @@ class LabTestRequestViewSet(viewsets.ModelViewSet):
         """Auto-validate that doctor owns the consultation and set default priority"""
         consultation = serializer.validated_data['CONSULT_ID']
         
-        if consultation.DOC_ID.STAFF_ID != self.request.user.staff_detail.STAFF_ID:  # FIXED
-            raise serializers.ValidationError("You can only request tests for your own consultations")
+        if consultation.DOC_ID.STAFF_ID != self.request.user.staff_detail.STAFF_ID:
+            from rest_framework import serializers as drf_serializers
+            raise drf_serializers.ValidationError("You can only request tests for your own consultations")
         
         if 'Priority' not in serializer.validated_data:
             serializer.validated_data['Priority'] = 'routine'
@@ -352,7 +360,7 @@ class LabTestRequestViewSet(viewsets.ModelViewSet):
         try:
             consultation = ConsultationDetail.objects.get(CONSULT_ID=consult_id)
             
-            if consultation.DOC_ID.STAFF_ID != request.user.staff_detail.STAFF_ID:  # FIXED
+            if consultation.DOC_ID.STAFF_ID != request.user.staff_detail.STAFF_ID:
                 return Response(
                     {'error': 'You can only request tests for your own consultations'},
                     status=status.HTTP_403_FORBIDDEN
@@ -380,7 +388,7 @@ class LabTestRequestViewSet(viewsets.ModelViewSet):
         """Allow doctors to cancel their own lab requests"""
         lab_request = self.get_object()
         
-        if lab_request.CONSULT_ID.DOC_ID.STAFF_ID != request.user.staff_detail.STAFF_ID:  # FIXED
+        if lab_request.CONSULT_ID.DOC_ID.STAFF_ID != request.user.staff_detail.STAFF_ID:
             return Response(
                 {'error': 'You can only cancel your own lab requests'},
                 status=status.HTTP_403_FORBIDDEN
@@ -400,7 +408,8 @@ class LabTestRequestViewSet(viewsets.ModelViewSet):
             'message': 'Lab request cancelled successfully',
             'lab_request': serializer.data
         })
-    
+
+# ============= LAB RESULTS =============
 class LabResultsViewSet(viewsets.ReadOnlyModelViewSet):
     """Doctor's view for lab results with patient and priority filtering"""
     serializer_class = LabTestResultsSerializer
@@ -408,8 +417,8 @@ class LabResultsViewSet(viewsets.ReadOnlyModelViewSet):
     
     def get_queryset(self):
         """Doctors can only see lab results for their own patients"""
-        if hasattr(self.request.user, 'staff_detail'):  # FIXED
-            doctor_id = self.request.user.staff_detail.STAFF_ID  # FIXED
+        if hasattr(self.request.user, 'staff_detail'):
+            doctor_id = self.request.user.staff_detail.STAFF_ID
             
             return LabTestResult.objects.filter(
                 LAB_REQUEST__CONSULT_ID__DOC_ID=doctor_id
@@ -421,8 +430,8 @@ class LabResultsViewSet(viewsets.ReadOnlyModelViewSet):
         """Get lab results for a specific patient"""
         patient_id = request.query_params.get('patient_id', None)
         
-        if hasattr(request.user, 'staff_detail') and request.user.staff_detail.Role == 'Doctor':  # FIXED
-            doctor_id = request.user.staff_detail.STAFF_ID  # FIXED
+        if hasattr(request.user, 'staff_detail') and request.user.staff_detail.Role == 'Doctor':
+            doctor_id = request.user.staff_detail.STAFF_ID
             
             if not patient_id:
                 return Response(
@@ -448,8 +457,8 @@ class LabResultsViewSet(viewsets.ReadOnlyModelViewSet):
         """Get lab results filtered by priority/urgency level"""
         priority = request.query_params.get('priority', None)
         
-        if hasattr(request.user, 'staff_detail') and request.user.staff_detail.Role == 'Doctor':  # FIXED
-            doctor_id = request.user.staff_detail.STAFF_ID  # FIXED
+        if hasattr(request.user, 'staff_detail') and request.user.staff_detail.Role == 'Doctor':
+            doctor_id = request.user.staff_detail.STAFF_ID
             
             valid_priorities = ['routine', 'priority', 'stat']
             if priority and priority not in valid_priorities:
@@ -487,8 +496,8 @@ class LabResultsViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=['get'])
     def recent_results(self, request):
         """Get recent lab results (last 7 days) with urgency indicators"""
-        if hasattr(request.user, 'staff_detail') and request.user.staff_detail.Role == 'Doctor':  # FIXED
-            doctor_id = request.user.staff_detail.STAFF_ID  # FIXED
+        if hasattr(request.user, 'staff_detail') and request.user.staff_detail.Role == 'Doctor':
+            doctor_id = request.user.staff_detail.STAFF_ID
             seven_days_ago = timezone.now() - timedelta(days=7)
             
             recent_results = LabTestResult.objects.filter(
@@ -516,8 +525,8 @@ class LabResultsViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=['get'])
     def pending_results(self, request):
         """Get pending lab test requests (not yet completed)"""
-        if hasattr(request.user, 'staff_detail') and request.user.staff_detail.Role == 'Doctor':  # FIXED
-            doctor_id = request.user.staff_detail.STAFF_ID  # FIXED
+        if hasattr(request.user, 'staff_detail') and request.user.staff_detail.Role == 'Doctor':
+            doctor_id = request.user.staff_detail.STAFF_ID
             
             pending_requests = LabTestRequestDetail.objects.filter(
                 CONSULT_ID__DOC_ID=doctor_id,
@@ -546,8 +555,7 @@ class LabResultsViewSet(viewsets.ReadOnlyModelViewSet):
             })
         return Response([])
 
-# In doctorapp/views.py, add these to the existing views
-
+# ============= DOCTOR AVAILABILITY =============
 class DoctorAvailabilityViewSet(viewsets.ViewSet):
     """ViewSet for doctors to manage their availability"""
     permission_classes = [IsAuthenticated, IsDoctorUser]
@@ -564,7 +572,7 @@ class DoctorAvailabilityViewSet(viewsets.ViewSet):
                 'status_display': doctor.get_Status_display(),
                 'department': doctor.Department.Department_Name if doctor.Department else None,
                 'consultation_fees': doctor.Consultation_fees,
-                'can_change_status': True  # Doctors can always change their own status
+                'can_change_status': True
             })
         return Response({'error': 'Doctor profile not found'}, status=status.HTTP_404_NOT_FOUND)
     
@@ -581,12 +589,9 @@ class DoctorAvailabilityViewSet(viewsets.ViewSet):
                     'error': f'Invalid status. Must be one of: {", ".join(valid_statuses)}'
                 }, status=status.HTTP_400_BAD_REQUEST)
             
-            # Update status
             doctor.Status = new_status
             doctor.save()
             
-            # Log the status change
-            from authentication.models import SystemLog
             SystemLog.objects.create(
                 level='INFO',
                 log_type='USER',
@@ -643,6 +648,7 @@ class DoctorAvailabilityViewSet(viewsets.ViewSet):
             })
         return Response({'error': 'Doctor profile not found'}, status=status.HTTP_404_NOT_FOUND)
 
+# ============= AVAILABLE MEDICINES =============
 class AvailableMedicinesViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated, IsDoctorUser | IsAdminUser]
     serializer_class = MedicineDetailsSerializer
@@ -680,3 +686,91 @@ class AvailableMedicinesViewSet(viewsets.ReadOnlyModelViewSet):
                 }
             })
         return Response(data)
+
+# ============= PATIENT SEARCH =============
+class PatientSearchViewSet(viewsets.ViewSet):
+    """ViewSet for patient search functionality for doctors"""
+    permission_classes = [IsAuthenticated]
+    
+    @action(detail=False, methods=['get'])
+    def search(self, request):
+        """Search patients by various criteria"""
+        search_term = request.query_params.get('search', '').strip()
+        
+        if not search_term:
+            # Return recent patients if no search term
+            week_ago = datetime.now() - timedelta(days=7)
+            
+            recent_patients = PatientDetail.objects.filter(
+                appointments__Date__gte=week_ago
+            ).distinct().order_by('-appointments__Date')[:10]
+            
+            serializer = PatientDetailsSerializer(recent_patients, many=True)
+            return Response(serializer.data)
+
+        # Build search query
+        query = Q()
+        
+        # Exact PAT_ID match
+        query |= Q(PAT_ID__iexact=search_term)
+        
+        # Partial matches
+        query |= Q(PAT_ID__icontains=search_term)
+        query |= Q(Patient_Name__icontains=search_term)
+        
+        # Phone number search
+        phone_clean = ''.join(filter(str.isdigit, search_term))
+        if phone_clean:
+            query |= Q(Phone_Number__icontains=phone_clean)
+            query |= Q(Emergency_Contact__icontains=phone_clean)
+        
+        # Email search
+        if '@' in search_term:
+            query |= Q(Email__iexact=search_term)
+            query |= Q(Email__icontains=search_term)
+        
+        # Search by approximate age
+        if search_term.isdigit() and len(search_term) <= 3:
+            try:
+                age = int(search_term)
+                target_date = date.today() - timedelta(days=age*365)
+                query |= Q(DOB__year=target_date.year)
+            except:
+                pass
+        
+        patients = PatientDetail.objects.filter(query).distinct().order_by('-created_at')[:20]
+        serializer = PatientDetailsSerializer(patients, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'])
+    def recent(self, request):
+        """Get patients with recent appointments for the current doctor"""
+        if hasattr(request.user, 'staff_detail'):
+            doctor_id = request.user.staff_detail.STAFF_ID
+            
+            # Patients with appointments from this doctor in last 7 days
+            week_ago = datetime.now() - timedelta(days=7)
+            
+            recent_patients = PatientDetail.objects.filter(
+                appointments__DOC_ID=doctor_id,
+                appointments__Date__gte=week_ago
+            ).distinct().order_by('-appointments__Date')[:10]
+            
+            serializer = PatientDetailsSerializer(recent_patients, many=True)
+            return Response(serializer.data)
+        return Response([])
+    
+    @action(detail=True, methods=['get'])
+    def appointments(self, request, pk=None):
+        """Get appointments for a specific patient with current doctor"""
+        if hasattr(request.user, 'staff_detail'):
+            doctor_id = request.user.staff_detail.STAFF_ID
+            
+            appointments = AppointmentDetail.objects.filter(
+                PAT_ID=pk,
+                DOC_ID=doctor_id
+            ).order_by('-Date', '-Time')
+            
+            serializer = AppointmentDetailsSerializer(appointments, many=True)
+            return Response(serializer.data)
+        return Response([])

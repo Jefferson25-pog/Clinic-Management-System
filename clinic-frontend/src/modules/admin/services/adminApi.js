@@ -1,4 +1,4 @@
-// src/modules/admin/services/adminApi.js - SIMPLIFIED
+// src/modules/admin/services/adminApi.js - FIXED ENDPOINTS
 import axiosInstance from "../../../api/axiosInstance.js";
 
 export const adminApi = {
@@ -38,10 +38,10 @@ export const adminApi = {
     axiosInstance.post(`/api/admin/staffs/${staffId}/unlink_account/`),
   
   // ============= PASSWORD MANAGEMENT =============
-  resetUserPassword: (staffId, newPassword) => 
-    axiosInstance.post(`/api/auth/staff/${staffId}/reset-password/`, {
-      new_password: newPassword 
-    }),
+  resetUserPasswordById: (userId, data) => 
+  axiosInstance.post(`/api/admin/staffs/${userId}/reset_password/`, {
+    new_password: data.new_password 
+  }),
   
   // Create user account (STANDALONE - not linked to staff)
   createUser: (data) => 
@@ -92,9 +92,6 @@ export const adminApi = {
   
   deleteUser: (id) => 
     axiosInstance.delete(`/api/auth/users/${id}/delete/`),
-  
-  resetUserPasswordById: (userId, data) => 
-    axiosInstance.post(`/api/auth/users/${userId}/reset-password/`, data),
 
   syncUserRole: (userId) =>
     axiosInstance.post(`/api/auth/users/${userId}/sync-role/`),
@@ -106,8 +103,9 @@ export const adminApi = {
   getActivityMonitor: () =>
     axiosInstance.get("/api/auth/activity-monitor/"),
   
+  // FIX THIS ENDPOINT - IT MIGHT BE DIFFERENT
   getDashboardStats: () =>
-    axiosInstance.get("/api/auth/dashboard-stats/"),
+    axiosInstance.get("/api/admin/dashboard-stats/"), // Changed from /api/auth/dashboard-stats/
   
   // ============= Login History =============
   getLoginHistory: (params = {}) =>
@@ -115,6 +113,10 @@ export const adminApi = {
 
   forceLogout: (loginId) =>
     axiosInstance.post(`/api/auth/login-history/${loginId}/force-logout/`),
+  
+  // Add a debug endpoint
+  testEndpoint: (endpoint) =>
+    axiosInstance.get(endpoint),
 };
 
 export const authApi = {
@@ -139,8 +141,14 @@ export const authApi = {
     axiosInstance.put("/api/auth/profile/", data),
   
   // ============= Password Management =============
-  changePassword: (data) => 
-    axiosInstance.post("/api/auth/change-password/", data),
+  resetUserPassword: (staffId, newPassword) => 
+  axiosInstance.post(`/api/admin/staffs/${staffId}/reset_password/`, {
+    new_password: newPassword 
+  }),
+  
+  // Check auth endpoint
+  checkAuth: () =>
+    axiosInstance.get("/api/auth/check-auth/"),
 };
 
 export default adminApi;
