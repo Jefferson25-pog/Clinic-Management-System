@@ -1,4 +1,4 @@
-// src/modules/doctor/pages/DoctorDashboard.jsx - Fixed Version
+// src/modules/doctor/pages/DoctorDashboard.jsx - UPDATED WITH AVAILABILITY TOGGLE
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import doctorApi from "../services/doctorApi.js";
@@ -17,11 +17,19 @@ const DoctorDashboard = () => {
   const [loading, setLoading] = useState({
     stats: true,
     appointments: true,
-    recentActivity: true
+    recentActivity: true,
+    availability: false
   });
   
   const [recentActivity, setRecentActivity] = useState([]);
   const [upcomingAppointments, setUpcomingAppointments] = useState([]);
+  const [availability, setAvailability] = useState({
+    current_status: 'Available',
+    is_available: true,
+    next_status: 'Busy',
+    can_toggle: true
+  });
+  
   const { staffDetail } = useAuth();
 
   // Doctor Dashboard Tiles
@@ -80,12 +88,79 @@ const DoctorDashboard = () => {
     },
   ];
 
-  // Fetch dashboard statistics using available API methods
+  // Fetch availability status
+  const fetchAvailability = async () => {
+    try {
+      setLoading(prev => ({ ...prev, availability: true }));
+      const response = await doctorApi.getCurrentAvailability();
+      if (response.data) {
+        setAvailability({
+          current_status: response.data.current_status,
+          is_available: response.data.is_available,
+          next_status: response.data.next_status,
+          can_toggle: response.data.can_toggle,
+          doctor_name: response.data.doctor_name
+        });
+      }
+    } catch (error) {
+      console.error("Error fetching availability:", error);
+    } finally {
+      setLoading(prev => ({ ...prev, availability: false }));
+    }
+  };
+
+  // Toggle availability
+  const toggleAvailability = async () => {
+  if (!availability.can_toggle) return;
+  
+  try {
+    setLoading(prev => ({ ...prev, availability: true }));
+    const response = await doctorApi.toggleAvailability();
+    if (response.data && response.data.success) {
+      setAvailability(prev => ({
+        ...prev,
+        current_status: response.data.new_status,
+        is_available: response.data.new_status === 'Available',  // Check for 'Available' exactly
+        next_status: response.data.next_status
+      }));
+      
+      // Show success notification
+      alert(`Status changed to ${response.data.new_status}`);
+    }
+  } catch (error) {
+    console.error("Error toggling availability:", error);
+    alert("Failed to update availability");
+  } finally {
+    setLoading(prev => ({ ...prev, availability: false }));
+  }
+};
+
+  // Set specific status
+  const setSpecificStatus = async (status) => {
+    try {
+      setLoading(prev => ({ ...prev, availability: true }));
+      const response = await doctorApi.setAvailability(status);
+      if (response.data && response.data.success) {
+        setAvailability(prev => ({
+          ...prev,
+          current_status: response.data.new_status,
+          is_available: response.data.new_status === 'Available'
+        }));
+        alert(`Status set to ${response.data.new_status}`);
+      }
+    } catch (error) {
+      console.error("Error setting status:", error);
+      alert("Failed to update status");
+    } finally {
+      setLoading(prev => ({ ...prev, availability: false }));
+    }
+  };
+
+  // Fetch dashboard statistics
   const fetchDashboardStats = async () => {
     try {
       setLoading(prev => ({ ...prev, stats: true }));
       
-      // Only call APIs that exist
       const [appointmentsRes, labRequestsRes, consultationsRes, resultsRes] = await Promise.all([
         doctorApi.getTodayAppointments().catch(() => ({ data: [] })),
         doctorApi.getLabTestRequests().catch(() => ({ data: [] })),
@@ -93,32 +168,39 @@ const DoctorDashboard = () => {
         doctorApi.getPendingLabResults().catch(() => ({ data: [] }))
       ]);
 
-      // Process appointments
-      const appointments = Array.isArray(appointmentsRes?.data) ? appointmentsRes.data : [];
+      const appointments = Array.isArray(appointmentsRes?.data?.appointments) 
+        ? appointmentsRes.data.appointments 
+        : Array.isArray(appointmentsRes?.data) 
+          ? appointmentsRes.data 
+          : [];
+      
       const upcoming = appointments.filter(a => {
-        if (!a.appointment_time) return false;
-        return new Date(a.appointment_time) > new Date();
+        if (!a.appointment_time && !a.Time) return false;
+        const appointmentTime = a.appointment_time || a.Date + ' ' + a.Time;
+        return new Date(appointmentTime) > new Date();
       });
       
-      // Process lab requests
       const labRequests = Array.isArray(labRequestsRes?.data) ? labRequestsRes.data : [];
+      const consultations = Array.isArray(consultationsRes?.data?.consultations) 
+        ? consultationsRes.data.consultations 
+        : Array.isArray(consultationsRes?.data) 
+          ? consultationsRes.data 
+          : [];
       
-      // Process consultations
-      const consultations = Array.isArray(consultationsRes?.data) ? consultationsRes.data : [];
-      const pendingConsultations = consultations.filter(c => c.status === 'In Progress' || c.status === 'Pending');
+      const pendingConsultations = consultations.filter(c => 
+        c.status === 'In Progress' || c.status === 'Pending'
+      );
+      
       const completedConsultations = consultations.filter(c => c.status === 'Completed');
-      
-      // Process lab results
       const pendingResults = Array.isArray(resultsRes?.data) ? resultsRes.data : [];
       
-      // Count waiting patients (appointments with status 'Scheduled' or 'Waiting')
       const waitingPatients = appointments.filter(a => 
-        a.status === 'Scheduled' || a.status === 'Waiting' || a.status === 'Pending'
+        a.Status === 'Scheduled' || a.status === 'Waiting' || a.Status === 'Pending'
       ).length;
 
       setStats({
         today_appointments: appointments.length,
-        pending_lab_tests: labRequests.filter(r => r.status === 'Pending').length,
+        pending_lab_tests: labRequests.filter(r => r.Status === 'Requested' || r.status === 'Pending').length,
         pending_consultations: pendingConsultations.length,
         lab_results_pending: pendingResults.length,
         completed_consultations: completedConsultations.length,
@@ -126,7 +208,6 @@ const DoctorDashboard = () => {
         upcoming_appointments: upcoming.length
       });
 
-      // Store appointments for upcoming list
       setUpcomingAppointments(upcoming.slice(0, 5));
 
     } catch (error) {
@@ -136,39 +217,45 @@ const DoctorDashboard = () => {
     }
   };
 
-  // Simulate recent activity from existing data
+  // Simulate recent activity
   const fetchRecentActivity = async () => {
     try {
       setLoading(prev => ({ ...prev, recentActivity: true }));
       
-      // Create simulated recent activity from appointments and consultations
       const [appointmentsRes, consultationsRes] = await Promise.all([
         doctorApi.getTodayAppointments().catch(() => ({ data: [] })),
         doctorApi.getTodayConsultations().catch(() => ({ data: [] }))
       ]);
 
-      const appointments = Array.isArray(appointmentsRes?.data) ? appointmentsRes.data : [];
-      const consultations = Array.isArray(consultationsRes?.data) ? consultationsRes.data : [];
+      const appointments = Array.isArray(appointmentsRes?.data?.appointments) 
+        ? appointmentsRes.data.appointments 
+        : Array.isArray(appointmentsRes?.data) 
+          ? appointmentsRes.data 
+          : [];
+      
+      const consultations = Array.isArray(consultationsRes?.data?.consultations) 
+        ? consultationsRes.data.consultations 
+        : Array.isArray(consultationsRes?.data) 
+          ? consultationsRes.data 
+          : [];
 
-      // Create activity items from recent data
       const activities = [
-        ...appointments.slice(0, 3).map(app => ({
-          id: `app_${app.id || Date.now()}`,
+          ...appointments.slice(0, 3).map((app, index) => ({  // Add 'index' parameter here
+          id: `app_${app.id || Date.now()}_${index}`,  // Add index
           action: `Appointment: ${app.patient_name || 'Patient'}`,
           type: 'appointment',
           patient_name: app.patient_name,
-          timestamp: app.appointment_time || new Date().toISOString()
+          timestamp: app.appointment_time || app.Date + ' ' + app.Time || new Date().toISOString()
         })),
-        ...consultations.slice(0, 3).map(cons => ({
-          id: `cons_${cons.id || Date.now()}`,
+          ...consultations.slice(0, 3).map((cons, index) => ({  // Add 'index' parameter here
+          id: `cons_${cons.id || Date.now()}_${index}`,  // Add index
           action: `Consultation: ${cons.patient_name || 'Patient'}`,
           type: 'consultation',
           patient_name: cons.patient_name,
-          timestamp: cons.consultation_date || new Date().toISOString()
+          timestamp: cons.Consultation_Time || cons.consultation_date || new Date().toISOString()
         }))
       ];
 
-      // Sort by timestamp and take latest 6
       const sortedActivities = activities
         .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
         .slice(0, 6);
@@ -182,7 +269,7 @@ const DoctorDashboard = () => {
     }
   };
 
-  // Format time for display
+  // Format time
   const formatTime = (dateString) => {
     if (!dateString) return "N/A";
     try {
@@ -222,7 +309,11 @@ const DoctorDashboard = () => {
       'Completed': { color: 'success', icon: 'bi-check-circle' },
       'Cancelled': { color: 'danger', icon: 'bi-x-circle' },
       'Pending': { color: 'secondary', icon: 'bi-hourglass' },
-      'Waiting': { color: 'primary', icon: 'bi-person' }
+      'Waiting': { color: 'primary', icon: 'bi-person' },
+      'Available': { color: 'success', icon: 'bi-check-circle' },
+      'Busy': { color: 'warning', icon: 'bi-hourglass-split' },
+      'On Leave': { color: 'secondary', icon: 'bi-airplane' },
+      'Unavailable': { color: 'danger', icon: 'bi-slash-circle' }
     };
     
     const config = statusConfig[status] || { color: 'secondary', icon: 'bi-circle' };
@@ -239,6 +330,7 @@ const DoctorDashboard = () => {
   useEffect(() => {
     const fetchAllData = async () => {
       try {
+        await fetchAvailability();
         await fetchDashboardStats();
         await fetchRecentActivity();
       } catch (error) {
@@ -262,9 +354,11 @@ const DoctorDashboard = () => {
       setLoading({
         stats: true,
         appointments: true,
-        recentActivity: true
+        recentActivity: true,
+        availability: false
       });
       
+      await fetchAvailability();
       await fetchDashboardStats();
       await fetchRecentActivity();
     } catch (error) {
@@ -274,7 +368,7 @@ const DoctorDashboard = () => {
 
   return (
     <div>
-      {/* Header */}
+      {/* Header with Availability Toggle */}
       <div className="d-flex justify-content-between align-items-center mb-4 flex-wrap">
         <div className="mb-2 mb-md-0">
           <h3 className="mb-1">Doctor Dashboard</h3>
@@ -286,20 +380,141 @@ const DoctorDashboard = () => {
           </p>
         </div>
         <div className="text-end d-flex flex-wrap gap-2 align-items-center">
-          <div>
-            <small className="text-muted d-block">
-              <i className="bi bi-calendar-check me-1"></i>
-              {new Date().toLocaleDateString('en-US', { 
-                weekday: 'long', 
-                year: 'numeric', 
-                month: 'long', 
-                day: 'numeric' 
-              })}
-            </small>
-            <small className="text-muted">
+          {/* Availability Toggle */}
+          <div className="availability-toggle-container">
+            <div className="d-flex align-items-center gap-2">
+              <span className="text-muted small">Status:</span>
+              {loading.availability ? (
+                <span className="badge bg-secondary">
+                  <span className="spinner-border spinner-border-sm me-1"></span>
+                  Loading...
+                </span>
+              ) : (
+                <>
+                  {getStatusBadge(availability.current_status)}
+                  <button
+                    className={`btn btn-sm ${availability.is_available ? 'btn-warning' : 'btn-success'}`}
+                    onClick={toggleAvailability}
+                    disabled={!availability.can_toggle || loading.availability}
+                    title={availability.is_available ? "Click to mark as Busy" : "Click to mark as Available"}
+                  >
+                    <i className={`bi ${availability.is_available ? 'bi-hourglass-split' : 'bi-check-circle'} me-1`}></i>
+                    {availability.is_available ? "Go Busy" : "Go Available"}
+                  </button>
+                  {/* Status Dropdown for more options */}
+                  <div className="dropdown">
+                    <button className="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                      <i className="bi bi-gear"></i>
+                    </button>
+                    <ul className="dropdown-menu dropdown-menu-end">
+                      <li>
+                        <button 
+                          className="dropdown-item" 
+                          onClick={() => setSpecificStatus('Available')}
+                          disabled={loading.availability}
+                        >
+                          <i className="bi bi-check-circle text-success me-2"></i>
+                          Mark as Available
+                        </button>
+                      </li>
+                      <li>
+                        <button 
+                          className="dropdown-item" 
+                          onClick={() => setSpecificStatus('Busy')}
+                          disabled={loading.availability}
+                        >
+                          <i className="bi bi-hourglass-split text-warning me-2"></i>
+                          Mark as Busy
+                        </button>
+                      </li>
+                      <li><hr className="dropdown-divider" /></li>
+                      <li>
+                        <button 
+                          className="dropdown-item" 
+                          onClick={() => setSpecificStatus('On Leave')}
+                          disabled={loading.availability}
+                        >
+                          <i className="bi bi-airplane text-info me-2"></i>
+                          Mark as On Leave
+                        </button>
+                      </li>
+                      <li>
+                        <button 
+                          className="dropdown-item text-danger" 
+                          onClick={() => setSpecificStatus('Unavailable')}
+                          disabled={loading.availability}
+                        >
+                          <i className="bi bi-slash-circle me-2"></i>
+                          Mark as Unavailable
+                        </button>
+                      </li>
+                    </ul>
+                  </div>
+                </>
+              )}
+            </div>
+            <small className="text-muted d-block mt-1">
               <i className="bi bi-clock me-1"></i>
               Auto-refresh: 30s
             </small>
+          </div>
+        </div>
+      </div>
+
+      {/* Status Summary Card */}
+      <div className="card mb-4 border-0 shadow-sm">
+        <div className="card-body py-3">
+          <div className="row align-items-center">
+            <div className="col-md-3 text-center border-end">
+              <div className="text-muted small mb-1">Current Status</div>
+              <div className="fw-bold">
+                {loading.availability ? (
+                  <span className="placeholder col-4 bg-secondary"></span>
+                ) : (
+                  <span className={`text-${availability.is_available ? 'success' : 'warning'}`}>
+                    {availability.current_status}
+                  </span>
+                )}
+              </div>
+              <small className="text-muted">
+                {availability.is_available ? "Accepting patients" : "Currently occupied"}
+              </small>
+            </div>
+            <div className="col-md-3 text-center border-end">
+              <div className="text-muted small mb-1">Waiting Patients</div>
+              <div className="fw-bold text-primary">
+                {loading.stats ? (
+                  <span className="placeholder col-4 bg-primary"></span>
+                ) : (
+                  stats.waiting_patients
+                )}
+              </div>
+              <small className="text-muted">Ready to see doctor</small>
+            </div>
+            <div className="col-md-3 text-center border-end">
+              <div className="text-muted small mb-1">Today's Appointments</div>
+              <div className="fw-bold text-info">
+                {loading.stats ? (
+                  <span className="placeholder col-4 bg-info"></span>
+                ) : (
+                  stats.today_appointments
+                )}
+              </div>
+              <small className="text-muted">
+                {loading.stats ? "" : `${stats.upcoming_appointments} upcoming`}
+              </small>
+            </div>
+            <div className="col-md-3 text-center">
+              <div className="text-muted small mb-1">Pending Tasks</div>
+              <div className="fw-bold text-warning">
+                {loading.stats ? (
+                  <span className="placeholder col-4 bg-warning"></span>
+                ) : (
+                  stats.pending_consultations + stats.pending_lab_tests
+                )}
+              </div>
+              <small className="text-muted">Consultations & lab tests</small>
+            </div>
           </div>
         </div>
       </div>
@@ -511,6 +726,17 @@ const DoctorDashboard = () => {
                   ? 'Loading...' 
                   : 'Live'}
               </span>
+              <span className="ms-3">
+                <i className="bi bi-person-check me-1"></i>
+                Doctor Status: 
+                {loading.availability ? (
+                  <span className="ms-1 badge bg-secondary">Loading...</span>
+                ) : (
+                  <span className={`ms-1 badge bg-${availability.is_available ? 'success' : 'warning'}`}>
+                    {availability.current_status}
+                  </span>
+                )}
+              </span>
             </small>
           </div>
           <div className="col-md-6 text-md-end">
@@ -621,14 +847,14 @@ const DoctorDashboard = () => {
                             <div>
                               <h6 className="mb-0">{appointment.patient_name || 'Patient'}</h6>
                               <small className="text-muted">
-                                Appointment ID: {appointment.id || 'N/A'}
+                                ID: {appointment.id || 'N/A'}
                               </small>
                             </div>
                             <div className="text-end">
-                              {getStatusBadge(appointment.status || 'Scheduled')}
+                              {getStatusBadge(appointment.Status || appointment.status || 'Scheduled')}
                               <div className="text-primary small mt-1 fw-semibold">
                                 <i className="bi bi-clock me-1"></i>
-                                {formatTime(appointment.appointment_time)}
+                                {formatTime(appointment.appointment_time || appointment.Date + ' ' + appointment.Time)}
                               </div>
                             </div>
                           </div>
@@ -724,21 +950,45 @@ const DoctorDashboard = () => {
             <div className="card-body py-3">
               <div className="row text-center">
                 <div className="col-6 col-md-3 border-end">
-                  <div className="text-muted small">Last Updated</div>
+                  <div className="text-muted small">Current Status</div>
                   <div className="fw-bold">
-                    {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {loading.availability ? (
+                      <span className="placeholder col-6 bg-secondary"></span>
+                    ) : (
+                      <span className={`text-${availability.is_available ? 'success' : 'warning'}`}>
+                        {availability.current_status}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="col-6 col-md-3 border-end">
                   <div className="text-muted small">Today's Consultations</div>
                   <div className="fw-bold text-primary">
-                    {stats.completed_consultations} completed
+                    {loading.stats ? (
+                      <span className="placeholder col-6 bg-primary"></span>
+                    ) : (
+                      stats.completed_consultations
+                    )}
+                  </div>
+                </div>
+                <div className="col-6 col-md-3 border-end">
+                  <div className="text-muted small">Waiting Patients</div>
+                  <div className="fw-bold text-info">
+                    {loading.stats ? (
+                      <span className="placeholder col-6 bg-info"></span>
+                    ) : (
+                      stats.waiting_patients
+                    )}
                   </div>
                 </div>
                 <div className="col-6 col-md-3">
-                  <div className="text-muted small">Active Lab Tests</div>
-                  <div className="fw-bold text-info">
-                    {stats.pending_lab_tests} pending
+                  <div className="text-muted small">Pending Lab Tests</div>
+                  <div className="fw-bold text-warning">
+                    {loading.stats ? (
+                      <span className="placeholder col-6 bg-warning"></span>
+                    ) : (
+                      stats.pending_lab_tests
+                    )}
                   </div>
                 </div>
               </div>

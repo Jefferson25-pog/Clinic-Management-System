@@ -1,7 +1,10 @@
 from rest_framework import serializers
 from .models import ConsultationDetail, Prescription, LabTestRequestDetail
 from labtechapp.models import LabTest
+from labtechapp.serializers import LabTestsSerializer
 import re
+
+# doctorapp/serializers.py - FIX THE SERIALIZER
 
 class ConsultationDetailsSerializer(serializers.ModelSerializer):
     patient_name = serializers.CharField(source='TOKEN_NO.PAT_ID.Patient_Name', read_only=True)
@@ -9,30 +12,13 @@ class ConsultationDetailsSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = ConsultationDetail
-        fields = '__all__'
-        read_only_fields = ['patient_name', 'doctor_name', 'Consultation_Time']
-    
-    def _contains_meaningful_text(self, text):
-        words = re.findall(r'[a-zA-Z]+', text)
-        meaningful_words = [word for word in words if len(word) >= 3]
-        return len(meaningful_words) >= 2
-    
-    def _excessive_numbers(self, text, threshold=0.3):
-        total_chars = len(text)
-        if total_chars == 0:
-            return False
-        
-        num_count = len(re.findall(r'\d', text))
-        letter_count = len(re.findall(r'[a-zA-Z]', text))
-        
-        if letter_count < 5:
-            return True
-        
-        alphanumeric_count = num_count + letter_count
-        if alphanumeric_count > 0:
-            return (num_count / alphanumeric_count) > threshold
-        
-        return False
+        fields = [
+            'CONSULT_ID', 'TOKEN_NO', 'DOC_ID', 
+            'Symptoms', 'Diagnosis', 'Description',
+            'Consultation_Status', 'Consultation_Time',
+            'patient_name', 'doctor_name'  # ADD THESE
+        ]
+        read_only_fields = ['patient_name', 'doctor_name', 'Consultation_Time', 'CONSULT_ID']
     
     def validate_Symptoms(self, value):
         cleaned_value = value.strip()
@@ -69,8 +55,35 @@ class ConsultationDetailsSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError("Description should contain meaningful text if provided")
         return value
     
+    def _contains_meaningful_text(self, text):
+        words = re.findall(r'[a-zA-Z]+', text)
+        meaningful_words = [word for word in words if len(word) >= 3]
+        return len(meaningful_words) >= 2
+    
+    def _excessive_numbers(self, text, threshold=0.3):
+        total_chars = len(text)
+        if total_chars == 0:
+            return False
+        
+        num_count = len(re.findall(r'\d', text))
+        letter_count = len(re.findall(r'[a-zA-Z]', text))
+        
+        if letter_count < 5:
+            return True
+        
+        alphanumeric_count = num_count + letter_count
+        if alphanumeric_count > 0:
+            return (num_count / alphanumeric_count) > threshold
+        
+        return False
+    
     def validate(self, data):
-        if data['TOKEN_NO'].Status != 'Completed':
+        # If updating, don't check appointment status
+        if self.instance:
+            return data
+            
+        # Only check for new consultations
+        if 'TOKEN_NO' in data and data['TOKEN_NO'].Status != 'Completed':
             raise serializers.ValidationError(
                 {"TOKEN_NO": "Consultation can only be created for completed appointments"}
             )

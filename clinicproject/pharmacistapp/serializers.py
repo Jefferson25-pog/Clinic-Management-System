@@ -98,6 +98,8 @@ class StockOrderingDetailsSerializer(serializers.ModelSerializer):
         if value > 1000000:
             raise serializers.ValidationError("Cost cannot exceed 1,000,000")
         return value
+    
+    # REMOVED THE WRONG validate METHOD THAT BELONGS TO DispensingMedicinesSerializer
 
 class DispensingMedicinesSerializer(serializers.ModelSerializer):
     medicine_name = serializers.CharField(source='MED_ID.Medicine_Name', read_only=True)
@@ -128,11 +130,11 @@ class DispensingMedicinesSerializer(serializers.ModelSerializer):
         return value
     
     def validate(self, data):
-        # Check stock availability
+        # Check stock availability - CORRECTED FIELD NAMES
         stock = StockDetails.objects.filter(
             MED_ID=data['MED_ID'],
-            Stock_Availability__gte=data['Qty'],
-            Expiry_Date__gt=date.today()
+            Total_Stock_Availability__gte=data['Qty'],  # FIXED: Changed from Stock_Availability
+            Earliest_Expiry__gt=date.today()  # FIXED: Changed from Expiry_Date
         ).first()
         
         if not stock:

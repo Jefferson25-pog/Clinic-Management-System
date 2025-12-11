@@ -1,7 +1,10 @@
+# In doctorapp/models.py - FIXED VERSION
 from django.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator, RegexValidator
 from django.core.exceptions import ValidationError
 import re
+from datetime import date
+from django.utils import timezone  # FIXED IMPORT
 
 class ConsultationDetail(models.Model):
     CONSULTATION_STATUS_CHOICES = [
@@ -11,7 +14,9 @@ class ConsultationDetail(models.Model):
         ('cancelled', 'Cancelled')
     ]
     
-    CONSULT_ID = models.AutoField(primary_key=True, verbose_name="Consultation ID")
+    # FIX: Must match migration - use AutoField or CharField consistently
+    CONSULT_ID = models.CharField(max_length=20, primary_key=True, verbose_name="Consultation ID")  # Keep as CharField
+    
     TOKEN_NO = models.ForeignKey('receptionistapp.AppointmentDetail', on_delete=models.CASCADE, verbose_name="Token Number")
     DOC_ID = models.ForeignKey('adminapp.StaffDetail', on_delete=models.CASCADE, limit_choices_to={'Role': 'Doctor'}, verbose_name="Doctor")
     Symptoms = models.TextField(verbose_name="Symptoms")
@@ -24,9 +29,80 @@ class ConsultationDetail(models.Model):
         verbose_name="Consultation Status"
     )
     Consultation_Time = models.DateTimeField(auto_now_add=True, verbose_name="Consultation Time")
+    Created_Date = models.DateTimeField(auto_now_add=True)
     
     def __str__(self):
         return f"Consultation {self.CONSULT_ID} - {self.TOKEN_NO.PAT_ID.Patient_Name} with Dr. {self.DOC_ID.Name}"
+    
+    def save(self, *args, **kwargs):
+        is_new = not self.pk
+        
+        # Auto-generate CONSULT_ID if not provided
+        if is_new and not self.CONSULT_ID:
+            today = date.today()
+            consultations_today = ConsultationDetail.objects.filter(Created_Date__date=today)
+            
+            if consultations_today.exists():
+                try:
+                    max_num = 0
+                    for consultation in consultations_today:
+                        if consultation.CONSULT_ID.startswith('CON-'):
+                            try:
+                                num = int(consultation.CONSULT_ID.split('-')[1])
+                                max_num = max(max_num, num)
+                            except:
+                                pass
+                    new_num = max_num + 1
+                except:
+                    new_num = 1
+            else:
+                new_num = 1
+            
+            self.CONSULT_ID = f"CON-{new_num:04d}"
+        
+        # Get old status if updating
+        old_status = None
+        if not is_new:
+            try:
+                old_obj = ConsultationDetail.objects.get(pk=self.pk)
+                old_status = old_obj.Consultation_Status
+            except:
+                pass
+        
+        # Save the consultation
+        super().save(*args, **kwargs)
+        
+        # If status changed to 'completed', handle completion
+        if not is_new and old_status != 'completed' and self.Consultation_Status == 'completed':
+            self._complete_consultation()
+    
+    def _complete_consultation(self):
+        """Handle consultation completion"""
+        try:
+            # Update appointment status
+            appointment = self.TOKEN_NO
+            if appointment.Status != 'Completed':
+                appointment.Status = 'Completed'
+                appointment.completed_at = timezone.now()
+                appointment.save()
+            
+            # Create auto-generated bill if it doesn't exist
+            from receptionistapp.models import BillDetail
+            
+            if not BillDetail.objects.filter(CONSULT_ID=self).exists():
+                try:
+                    bill = BillDetail.objects.create(
+                        CONSULT_ID=self,
+                        auto_generated=True,
+                        Notes=f"Auto-generated bill for consultation {self.CONSULT_ID}"
+                    )
+                    # Force recalculation
+                    bill.calculate_costs()
+                    bill.save()
+                except Exception as e:
+                    print(f"Error creating auto bill: {e}")
+        except Exception as e:
+            print(f"Error completing consultation: {e}")
     
     def clean(self):
         # Symptoms validation

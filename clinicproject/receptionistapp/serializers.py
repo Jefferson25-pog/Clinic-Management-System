@@ -8,15 +8,16 @@ from adminapp.serializers import StaffDetailsSerializer
 
 class PatientDetailsSerializer(serializers.ModelSerializer):
     age = serializers.ReadOnlyField()
+    id = serializers.CharField(source='PAT_ID', read_only=True)  # Add this line
     
     class Meta:
         model = PatientDetail
         fields = [
-            'PAT_ID', 'Patient_Name', 'DOB', 'age', 'Address', 
+            'id', 'PAT_ID', 'Patient_Name', 'DOB', 'age', 'Address',  # Add 'id' here
             'Phone_Number', 'Email', 'Gender', 'Blood_Group',
             'Emergency_Contact', 'Occupation', 'created_at', 'updated_at'
         ]
-        read_only_fields = ['PAT_ID', 'age', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'PAT_ID', 'age', 'created_at', 'updated_at']
     
     def validate_Patient_Name(self, value):
         if not re.match(r'^[A-Za-z\s\.\-]+$', value):
@@ -136,3 +137,42 @@ class BillDetailsSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Cannot modify a bill that has already been paid")
         
         return data
+    
+# receptionistapp/serializers.py
+from rest_framework import serializers
+from .models import PatientMedicalInfo, PatientDetail
+
+class PatientMedicalInfoSerializer(serializers.ModelSerializer):
+    bmi = serializers.SerializerMethodField(read_only=True)
+    bmi_category = serializers.SerializerMethodField(read_only=True)
+    patient_name = serializers.CharField(source='patient.Patient_Name', read_only=True)
+    patient_age = serializers.IntegerField(source='patient.age', read_only=True)
+    
+    class Meta:
+        model = PatientMedicalInfo
+        fields = [
+            'patient', 'patient_name', 'patient_age',
+            'past_medical_history', 'allergies', 'chronic_conditions',
+            'current_medications', 'family_history', 'social_history',
+            'surgical_history', 'height', 'weight', 'blood_pressure',
+            'pulse', 'temperature', 'respiratory_rate', 'oxygen_saturation',
+            'additional_notes', 'bmi', 'bmi_category',
+            'last_updated_at', 'last_updated_by'
+        ]
+        read_only_fields = ['bmi', 'bmi_category', 'patient_name', 'patient_age', 'last_updated_at']
+    
+    def get_bmi(self, obj):
+        return obj.calculate_bmi()
+    
+    def get_bmi_category(self, obj):
+        return obj.get_bmi_category()
+    
+    def validate_height(self, value):
+        if value and (value < 50 or value > 250):  # 50cm to 250cm
+            raise serializers.ValidationError("Height must be between 50cm and 250cm")
+        return value
+    
+    def validate_weight(self, value):
+        if value and (value < 2 or value > 300):  # 2kg to 300kg
+            raise serializers.ValidationError("Weight must be between 2kg and 300kg")
+        return value

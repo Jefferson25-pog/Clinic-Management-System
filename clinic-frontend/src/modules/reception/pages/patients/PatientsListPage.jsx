@@ -1,3 +1,4 @@
+// src/modules/reception/pages/patients/PatientsListPage.jsx - UPDATED VERSION
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { receptionApi } from '../../services/receptionApi';
@@ -6,116 +7,127 @@ const PatientsListPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [patients, setPatients] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState({
+    stats: true,
+    list: true
+  });
   const [error, setError] = useState('');
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   
-  // Filters state
+  // Filters state - UPDATED WITH MORE OPTIONS
   const [filters, setFilters] = useState({
     search: '',
     gender: '',
     blood_group: '',
     date_from: '',
-    date_to: ''
+    date_to: '',
+    min_age: '',
+    max_age: '',
+    ordering: '-created_at'
   });
   
-  // Pagination
+  // Pagination - UPDATED
   const [pagination, setPagination] = useState({
     current_page: 1,
     page_size: 10,
     total_pages: 1,
-    total_count: 0
+    total_count: 0,
+    has_next: false,
+    has_previous: false
   });
 
-  // Stats
+  // Stats - UPDATED WITH MORE DETAILS
   const [stats, setStats] = useState({
     total: 0,
     today: 0,
-    this_month: 0
+    this_month: 0,
+    last_7_days: 0,
+    gender_stats: {},
+    blood_group_stats: {},
+    recent_registrations: []
   });
 
-  // Fetch patients with filters
+  // Fetch patient stats - UPDATED
   const fetchPatients = async () => {
-    setLoading(true);
-    setError('');
+  setLoading(prev => ({ ...prev, list: true }));
+  setError('');
+  
+  try {
+    // Prepare params
+    const params = {
+      page: pagination.current_page,
+      page_size: pagination.page_size,
+      ordering: filters.ordering || '-created_at'
+    };
     
-    try {
-      // Prepare params
-      const params = {
-        page: pagination.current_page,
-        page_size: pagination.page_size,
-        ordering: '-created_at'
-      };
-      
-      // Add filters if provided
-      if (filters.search) params.search = filters.search;
-      if (filters.gender) params.gender = filters.gender;
-      if (filters.blood_group) params.blood_group = filters.blood_group;
-      if (filters.date_from) params.created_at__gte = filters.date_from;
-      if (filters.date_to) params.created_at__lte = filters.date_to;
-      
-      // Check URL for search query
-      const urlParams = new URLSearchParams(location.search);
-      const searchQuery = urlParams.get('search');
-      if (searchQuery && !filters.search) {
-        params.search = searchQuery;
-        setFilters(prev => ({ ...prev, search: searchQuery }));
+    // Add filters if provided
+    Object.keys(filters).forEach(key => {
+      if (filters[key] && filters[key] !== '') {
+        params[key] = filters[key];
       }
-      
-      const response = await receptionApi.getPatients(params);
-      
-      if (response.data) {
-        // Handle different response formats
-        let patientsList = [];
-        let totalCount = 0;
-        let totalPages = 1;
-        
-        if (response.data.results) {
-          // Django REST Framework pagination format
-          patientsList = response.data.results;
-          totalCount = response.data.count || 0;
-          totalPages = Math.ceil(totalCount / pagination.page_size);
-        } else if (Array.isArray(response.data)) {
-          // Simple array format
-          patientsList = response.data;
-          totalCount = response.data.length;
-        } else {
-          // Other formats
-          patientsList = [];
-        }
-        
-        setPatients(patientsList);
+    });
+    
+    // Check URL for search query
+    const urlParams = new URLSearchParams(location.search);
+    const searchQuery = urlParams.get('search');
+    if (searchQuery && !filters.search) {
+      params.search = searchQuery;
+      setFilters(prev => ({ ...prev, search: searchQuery }));
+    }
+    
+    // Use advanced search if any filter is active
+    const hasFilters = Object.keys(filters).some(key => 
+      filters[key] && filters[key] !== '' && key !== 'ordering'
+    );
+    
+    const response = hasFilters 
+      ? await receptionApi.getPatientsAdvanced(params)
+      : await receptionApi.getPatients(params);
+    
+    if (response.data) {
+      // Handle new advanced search format
+      if (response.data.results) {
+        setPatients(response.data.results);
         setPagination(prev => ({
           ...prev,
-          total_pages: totalPages,
-          total_count: totalCount
+          total_pages: response.data.total_pages || 1,
+          total_count: response.data.count || 0,
+          has_next: response.data.has_next || false,
+          has_previous: response.data.has_previous || false
+        }));
+      } else if (Array.isArray(response.data)) {
+        // Simple array format (regular endpoint)
+        setPatients(response.data);
+        setPagination(prev => ({
+          ...prev,
+          total_count: response.data.length
         }));
       }
-      
-    } catch (err) {
-      console.error('Error fetching patients:', err);
-      setError('Failed to load patients. Please try again.');
-    } finally {
-      setLoading(false);
     }
-  };
+    
+  } catch (err) {
+    console.error('Error fetching patients:', err);
+    setError('Failed to load patients. Please try again.');
+  } finally {
+    setLoading(prev => ({ ...prev, list: false }));
+  }
+};
 
-  // Fetch patient stats
-  const fetchPatientStats = async () => {
-    try {
-      const response = await receptionApi.getPatients({ page_size: 1 });
-      if (response.data) {
-        setStats({
-          total: response.data.count || patients.length,
-          today: 0, // You'll need an endpoint for this
-          this_month: 0 // You'll need an endpoint for this
-        });
-      }
-    } catch (err) {
-      console.error('Error fetching stats:', err);
+const fetchPatientStats = async () => {
+  setLoading(prev => ({ ...prev, stats: true }));
+  
+  try {
+    const response = await receptionApi.getPatientStats();
+    if (response.data) {
+      setStats(response.data);
     }
-  };
+  } catch (err) {
+    console.error('Error fetching patient stats:', err);
+  } finally {
+    setLoading(prev => ({ ...prev, stats: false }));
+  }
+};
 
   // Delete patient
   const handleDeletePatient = async () => {
@@ -159,7 +171,10 @@ const PatientsListPage = () => {
       gender: '',
       blood_group: '',
       date_from: '',
-      date_to: ''
+      date_to: '',
+      min_age: '',
+      max_age: '',
+      ordering: '-created_at'
     });
     setPagination(prev => ({ ...prev, current_page: 1 }));
     fetchPatients();
@@ -215,16 +230,54 @@ const PatientsListPage = () => {
 
   // Initial data fetch
   useEffect(() => {
-    fetchPatients();
     fetchPatientStats();
+  }, []);
+
+  useEffect(() => {
+    fetchPatients();
   }, [pagination.current_page, location.search]);
 
-  // Quick stats
+  // Update fetch when filters change (with debounce)
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (!loading.list) {
+        fetchPatients();
+      }
+    }, 300); // 300ms debounce
+    
+    return () => clearTimeout(timeoutId);
+  }, [filters]);
+
+  // Quick stats - UPDATED WITH MORE STATS
   const quickStats = [
-    { label: 'Total Patients', value: stats.total, icon: 'bi-people', color: 'primary' },
-    { label: 'Registered Today', value: stats.today, icon: 'bi-calendar-day', color: 'success' },
-    { label: 'This Month', value: stats.this_month, icon: 'bi-calendar-month', color: 'info' },
-    { label: 'On This Page', value: patients.length, icon: 'bi-list', color: 'warning' }
+    { 
+      label: 'Total Patients', 
+      value: stats.total, 
+      icon: 'bi-people', 
+      color: 'primary',
+      subtext: `Registered in system`
+    },
+    { 
+      label: 'Today', 
+      value: stats.today, 
+      icon: 'bi-calendar-day', 
+      color: 'success',
+      subtext: `New registrations`
+    },
+    { 
+      label: 'This Month', 
+      value: stats.this_month, 
+      icon: 'bi-calendar-month', 
+      color: 'info',
+      subtext: `Monthly registrations`
+    },
+    { 
+      label: 'Last 7 Days', 
+      value: stats.last_7_days, 
+      icon: 'bi-graph-up', 
+      color: 'warning',
+      subtext: `Recent activity`
+    }
   ];
 
   // Gender options
@@ -246,6 +299,16 @@ const PatientsListPage = () => {
     { value: 'AB-', label: 'AB-' },
     { value: 'O+', label: 'O+' },
     { value: 'O-', label: 'O-' }
+  ];
+
+  // Ordering options
+  const orderingOptions = [
+    { value: '-created_at', label: 'Newest First' },
+    { value: 'created_at', label: 'Oldest First' },
+    { value: 'Patient_Name', label: 'Name A-Z' },
+    { value: '-Patient_Name', label: 'Name Z-A' },
+    { value: 'PAT_ID', label: 'Patient ID Asc' },
+    { value: '-PAT_ID', label: 'Patient ID Desc' }
   ];
 
   return (
@@ -270,7 +333,7 @@ const PatientsListPage = () => {
         </div>
       </div>
 
-      {/* Quick Stats */}
+      {/* Quick Stats - IMPROVED */}
       <div className="row mb-4">
         {quickStats.map((stat, index) => (
           <div key={index} className="col-xl-3 col-lg-6 col-md-6 mb-3">
@@ -279,7 +342,16 @@ const PatientsListPage = () => {
                 <div className="d-flex justify-content-between align-items-start">
                   <div>
                     <h6 className="text-muted mb-1">{stat.label}</h6>
-                    <h3 className="mb-0">{loading ? '-' : stat.value}</h3>
+                    <h3 className="mb-0">
+                      {loading.stats ? (
+                        <span className="placeholder col-6"></span>
+                      ) : (
+                        stat.value.toLocaleString()
+                      )}
+                    </h3>
+                    <small className="text-muted">
+                      {stat.subtext}
+                    </small>
                   </div>
                   <div className={`avatar-sm bg-${stat.color} bg-opacity-10 rounded`}>
                     <i className={`bi ${stat.icon} fs-4 text-${stat.color}`}></i>
@@ -291,7 +363,45 @@ const PatientsListPage = () => {
         ))}
       </div>
 
-      {/* Search & Filters */}
+      {/* Additional Stats Row */}
+      {!loading.stats && (
+        <div className="row mb-4">
+          <div className="col-12">
+            <div className="card border-0 shadow-sm">
+              <div className="card-body py-2">
+                <div className="row text-center">
+                  <div className="col-md-3 border-end">
+                    <small className="text-muted">Male Patients</small>
+                    <div className="fw-bold text-primary">
+                      {stats.gender_stats.Male || 0}
+                    </div>
+                  </div>
+                  <div className="col-md-3 border-end">
+                    <small className="text-muted">Female Patients</small>
+                    <div className="fw-bold text-pink">
+                      {stats.gender_stats.Female || 0}
+                    </div>
+                  </div>
+                  <div className="col-md-3 border-end">
+                    <small className="text-muted">O+ Blood Group</small>
+                    <div className="fw-bold text-danger">
+                      {stats.blood_group_stats['O+'] || 0}
+                    </div>
+                  </div>
+                  <div className="col-md-3">
+                    <small className="text-muted">A+ Blood Group</small>
+                    <div className="fw-bold text-danger">
+                      {stats.blood_group_stats['A+'] || 0}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Search & Filters - IMPROVED */}
       <div className="card shadow-sm border-0 mb-4">
         <div className="card-body">
           <h5 className="card-title mb-3">
@@ -301,7 +411,7 @@ const PatientsListPage = () => {
           <form onSubmit={handleApplyFilters}>
             <div className="row g-2 mb-3">
               {/* Search Input */}
-              <div className="col-md-4">
+              <div className="col-md-3">
                 <div className="input-group">
                   <span className="input-group-text">
                     <i className="bi bi-search"></i>
@@ -310,7 +420,7 @@ const PatientsListPage = () => {
                     type="text"
                     name="search"
                     className="form-control"
-                    placeholder="Search by Name, ID, Phone, Email..."
+                    placeholder="Search patients..."
                     value={filters.search}
                     onChange={handleFilterChange}
                   />
@@ -349,47 +459,100 @@ const PatientsListPage = () => {
                 </select>
               </div>
               
-              {/* Date Range Filters */}
+              {/* Age Range Filters */}
               <div className="col-md-2">
+                <input
+                  type="number"
+                  name="min_age"
+                  className="form-control"
+                  placeholder="Min Age"
+                  value={filters.min_age}
+                  onChange={handleFilterChange}
+                  min="0"
+                  max="120"
+                />
+              </div>
+              
+              <div className="col-md-2">
+                <input
+                  type="number"
+                  name="max_age"
+                  className="form-control"
+                  placeholder="Max Age"
+                  value={filters.max_age}
+                  onChange={handleFilterChange}
+                  min="0"
+                  max="120"
+                />
+              </div>
+              
+              {/* Ordering */}
+              <div className="col-md-1">
+                <select
+                  name="ordering"
+                  className="form-select"
+                  value={filters.ordering}
+                  onChange={handleFilterChange}
+                >
+                  {orderingOptions.map(option => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            
+            <div className="row g-2 mb-3">
+              {/* Date Range Filters */}
+              <div className="col-md-3">
+                <label className="form-label small mb-1">From Date</label>
                 <input
                   type="date"
                   name="date_from"
                   className="form-control"
-                  placeholder="From Date"
                   value={filters.date_from}
                   onChange={handleFilterChange}
                   max={new Date().toISOString().split('T')[0]}
                 />
               </div>
               
-              <div className="col-md-2">
+              <div className="col-md-3">
+                <label className="form-label small mb-1">To Date</label>
                 <input
                   type="date"
                   name="date_to"
                   className="form-control"
-                  placeholder="To Date"
                   value={filters.date_to}
                   onChange={handleFilterChange}
                   max={new Date().toISOString().split('T')[0]}
                   min={filters.date_from}
                 />
               </div>
+              
+              <div className="col-md-6 d-flex align-items-end">
+                <div className="d-flex gap-2 w-100">
+                  <button type="button" className="btn btn-outline-secondary flex-grow-1" onClick={handleClearFilters}>
+                    <i className="bi bi-x-circle me-1"></i>Clear All
+                  </button>
+                  <button type="submit" className="btn btn-primary flex-grow-1">
+                    <i className="bi bi-filter me-1"></i>Apply Filters
+                  </button>
+                </div>
+              </div>
             </div>
             
-            <div className="d-flex justify-content-between">
+            <div className="d-flex justify-content-between align-items-center">
               <div>
                 <small className="text-muted">
                   <i className="bi bi-info-circle me-1"></i>
-                  Total: {pagination.total_count} patients found
+                  Total: {loading.list ? 'Loading...' : `${pagination.total_count} patients found`}
                 </small>
               </div>
-              <div className="d-flex gap-2">
-                <button type="button" className="btn btn-outline-secondary" onClick={handleClearFilters}>
-                  <i className="bi bi-x-circle me-1"></i>Clear Filters
-                </button>
-                <button type="submit" className="btn btn-primary">
-                  <i className="bi bi-filter me-1"></i>Apply Filters
-                </button>
+              <div>
+                <small className="text-muted">
+                  Page {pagination.current_page} of {pagination.total_pages}
+                </small>
               </div>
             </div>
           </form>
@@ -403,7 +566,7 @@ const PatientsListPage = () => {
             <div className="alert alert-danger m-3">{error}</div>
           )}
           
-          {loading ? (
+          {loading.list ? (
             <div className="text-center py-5">
               <div className="spinner-border text-primary" role="status">
                 <span className="visually-hidden">Loading...</span>
@@ -415,7 +578,7 @@ const PatientsListPage = () => {
               <i className="bi bi-people display-1 text-muted"></i>
               <h5 className="mt-3">No Patients Found</h5>
               <p className="text-muted mb-4">
-                {filters.search || filters.gender || filters.blood_group 
+                {Object.values(filters).some(val => val) 
                   ? 'No patients match your search criteria.' 
                   : 'No patients in the system yet.'}
               </p>
@@ -444,7 +607,7 @@ const PatientsListPage = () => {
                       <tr key={patient.PAT_ID || patient.id}>
                         <td>
                           <span className="badge bg-secondary">
-                            PAT-{(patient.PAT_ID || patient.id).toString().padStart(6, '0')}
+                            {patient.PAT_ID || `PAT-${patient.id.toString().padStart(3, '0')}`}
                           </span>
                         </td>
                         <td>
@@ -471,7 +634,6 @@ const PatientsListPage = () => {
                         </td>
                         <td className="text-end">
                           <div className="btn-group btn-group-sm">
-                            {/* View Details */}
                             <Link
                               to={`/reception/patients/view/${patient.PAT_ID || patient.id}`}
                               className="btn btn-outline-info"
@@ -479,8 +641,6 @@ const PatientsListPage = () => {
                             >
                               <i className="bi bi-eye"></i>
                             </Link>
-                            
-                            {/* Edit */}
                             <Link
                               to={`/reception/patients/edit/${patient.PAT_ID || patient.id}`}
                               className="btn btn-outline-primary"
@@ -488,8 +648,6 @@ const PatientsListPage = () => {
                             >
                               <i className="bi bi-pencil"></i>
                             </Link>
-                            
-                            {/* Delete */}
                             <button
                               className="btn btn-outline-danger"
                               title="Delete"
@@ -508,49 +666,54 @@ const PatientsListPage = () => {
                 </table>
               </div>
               
-              {/* Pagination */}
+              {/* Pagination - IMPROVED */}
               {pagination.total_pages > 1 && (
                 <div className="card-footer border-0">
                   <nav aria-label="Page navigation">
                     <ul className="pagination justify-content-center mb-0">
-                      <li className={`page-item ${pagination.current_page === 1 ? 'disabled' : ''}`}>
+                      <li className={`page-item ${!pagination.has_previous ? 'disabled' : ''}`}>
                         <button
                           className="page-link"
                           onClick={() => handlePageChange(pagination.current_page - 1)}
+                          disabled={!pagination.has_previous}
                         >
                           <i className="bi bi-chevron-left"></i>
                         </button>
                       </li>
                       
-                      {[...Array(pagination.total_pages)].map((_, i) => {
-                        const pageNum = i + 1;
-                        // Show only nearby pages for large numbers
-                        if (
-                          pageNum === 1 ||
-                          pageNum === pagination.total_pages ||
-                          (pageNum >= pagination.current_page - 1 && pageNum <= pagination.current_page + 1)
-                        ) {
-                          return (
-                            <li
-                              key={pageNum}
-                              className={`page-item ${pagination.current_page === pageNum ? 'active' : ''}`}
-                            >
-                              <button
-                                className="page-link"
-                                onClick={() => handlePageChange(pageNum)}
-                              >
-                                {pageNum}
-                              </button>
-                            </li>
-                          );
+                      {/* Page numbers */}
+                      {Array.from({ length: Math.min(5, pagination.total_pages) }, (_, i) => {
+                        let pageNum;
+                        if (pagination.total_pages <= 5) {
+                          pageNum = i + 1;
+                        } else if (pagination.current_page <= 3) {
+                          pageNum = i + 1;
+                        } else if (pagination.current_page >= pagination.total_pages - 2) {
+                          pageNum = pagination.total_pages - 4 + i;
+                        } else {
+                          pageNum = pagination.current_page - 2 + i;
                         }
-                        return null;
+                        
+                        return (
+                          <li
+                            key={pageNum}
+                            className={`page-item ${pagination.current_page === pageNum ? 'active' : ''}`}
+                          >
+                            <button
+                              className="page-link"
+                              onClick={() => handlePageChange(pageNum)}
+                            >
+                              {pageNum}
+                            </button>
+                          </li>
+                        );
                       })}
                       
-                      <li className={`page-item ${pagination.current_page === pagination.total_pages ? 'disabled' : ''}`}>
+                      <li className={`page-item ${!pagination.has_next ? 'disabled' : ''}`}>
                         <button
                           className="page-link"
                           onClick={() => handlePageChange(pagination.current_page + 1)}
+                          disabled={!pagination.has_next}
                         >
                           <i className="bi bi-chevron-right"></i>
                         </button>
@@ -559,7 +722,6 @@ const PatientsListPage = () => {
                   </nav>
                   <div className="text-center mt-2">
                     <small className="text-muted">
-                      Page {pagination.current_page} of {pagination.total_pages} • 
                       Showing {patients.length} of {pagination.total_count} patients
                     </small>
                   </div>

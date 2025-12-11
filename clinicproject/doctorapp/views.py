@@ -4,13 +4,13 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, BasePermission
 from .models import ConsultationDetail, Prescription, LabTestRequestDetail
-from .serializers import ConsultationDetailsSerializer, PrescriptionSerializer, LabTestsSerializer, LabTestRequestDetailsSerializer
-from receptionistapp.models import AppointmentDetail, PatientDetail
-from receptionistapp.serializers import AppointmentDetailsSerializer, PatientDetailsSerializer
+from .serializers import ConsultationDetailsSerializer, PrescriptionSerializer, LabTestRequestDetailsSerializer
+from receptionistapp.models import AppointmentDetail, PatientDetail, BillDetail, PatientMedicalInfo
+from receptionistapp.serializers import AppointmentDetailsSerializer, PatientDetailsSerializer, PatientMedicalInfoSerializer, BillDetailsSerializer
 from pharmacistapp.models import StockDetails, MedicineDetail
 from pharmacistapp.serializers import MedicineDetailsSerializer
 from labtechapp.models import LabTest, LabTestResult
-from labtechapp.serializers import LabTestResultsSerializer
+from labtechapp.serializers import LabTestResultsSerializer, LabTestsSerializer as LabTechLabTestsSerializer
 from django.utils import timezone
 from django.db.models import Q
 from datetime import datetime, timedelta, date
@@ -280,6 +280,435 @@ class ConsultationDetailsViewSet(viewsets.ModelViewSet):
                 'consultations': serializer.data
             })
         return Response([])
+    
+    @action(detail=False, methods=['post'], url_path='create_from_appointment')
+    def create_from_appointment(self, request):
+        """
+        Create a consultation from an appointment (when doctor starts consultation)
+        """
+        try:
+            appointment_id = request.data.get('appointment_id')
+            token_no = request.data.get('token_no')
+            
+            if not appointment_id and not token_no:
+                return Response({
+                    'error': 'Either appointment_id or token_no is required'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Find appointment
+            appointment = None
+            if appointment_id:
+                appointment = AppointmentDetail.objects.filter(APPOINTMENT_ID=appointment_id).first()
+            elif token_no:
+                appointment = AppointmentDetail.objects.filter(TOKEN_NO=token_no).first()
+            
+            if not appointment:
+                return Response({
+                    'error': 'Appointment not found',
+                    'exists': False
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            # Check if consultation already exists
+            existing_consultation = ConsultationDetail.objects.filter(TOKEN_NO=appointment).first()
+            
+            if existing_consultation:
+                # Return existing consultation
+                serializer = self.get_serializer(existing_consultation)
+                return Response({
+                    'exists': True,
+                    'message': 'Consultation already exists',
+                    'consultation': serializer.data
+                })
+            
+            # Get doctor from request user (current logged-in doctor)
+            if not hasattr(request.user, 'staff_detail'):
+                return Response({
+                    'error': 'User is not a doctor',
+                    'exists': False
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            doctor_id = request.user.staff_detail.STAFF_ID
+            
+            # Create new consultation
+            consultation = ConsultationDetail.objects.create(
+                TOKEN_NO=appointment,
+                DOC_ID_id=doctor_id,
+                Symptoms=appointment.Reason or '',  # Use appointment reason as initial symptoms
+                Diagnosis='',
+                Description='',
+                Consultation_Status='in_progress',  # Start as in_progress
+                Consultation_Time=timezone.now()
+            )
+            
+            # Don't update appointment status yet (wait for completion)
+            # appointment.Status = 'Completed'  # REMOVE THIS
+            
+            serializer = self.get_serializer(consultation)
+            return Response({
+                'exists': False,
+                'message': 'Consultation created successfully',
+                'consultation': serializer.data
+            }, status=status.HTTP_201_CREATED)
+            
+        except Exception as e:
+            import traceback
+            print(f"Error creating consultation from appointment: {str(e)}")
+            print(traceback.format_exc())
+            
+            return Response({
+                'error': str(e),
+                'exists': False
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    # ============= FIXED by_token METHOD =============
+    @action(detail=False, methods=['get'])
+    def by_token(self, request):
+        """Get consultation by token number"""
+        token_no = request.query_params.get('token_no')
+        
+        if not token_no:
+            return Response(
+                {'error': 'token_no parameter is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            # DEBUG: Log what we're searching for
+            print(f"DEBUG: Searching for token: {token_no}")
+            
+            # First try to find appointment by TOKEN_NO field
+            appointment = AppointmentDetail.objects.filter(TOKEN_NO=token_no).first()
+            
+            # If not found by TOKEN_NO, try by APPOINTMENT_ID
+            if not appointment:
+                appointment = AppointmentDetail.objects.filter(APPOINTMENT_ID=token_no).first()
+            
+            if not appointment:
+                return Response({
+                    'exists': False,
+                    'message': 'Appointment not found for this token',
+                    'debug_info': f'No appointment found with TOKEN_NO or APPOINTMENT_ID = {token_no}'
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            print(f"DEBUG: Found appointment: {appointment.APPOINTMENT_ID}, TOKEN_NO: {appointment.TOKEN_NO}")
+            
+            # Get consultation for this appointment
+            # FIX: Use the correct field name - it might be TOKEN_NO_id or TOKEN_NO
+            consultation = ConsultationDetail.objects.filter(TOKEN_NO=appointment).first()
+            
+            if consultation:
+                # DEBUG: Print consultation fields to verify structure
+                print(f"DEBUG: Found consultation: {consultation.CONSULT_ID}")
+                print(f"DEBUG: Consultation fields: {consultation.__dict__}")
+                
+                # FIX: Use minimal fields to avoid Created_Date issue
+                # Create a custom response with only essential fields
+                consultation_data = {
+                    'CONSULT_ID': consultation.CONSULT_ID,
+                    'TOKEN_NO': consultation.TOKEN_NO_id,
+                    'DOC_ID': consultation.DOC_ID_id,
+                    'Symptoms': consultation.Symptoms,
+                    'Diagnosis': consultation.Diagnosis,
+                    'Description': consultation.Description,
+                    'Consultation_Status': consultation.Consultation_Status,
+                    'Consultation_Time': consultation.Consultation_Time,
+                    # Skip Created_Date temporarily
+                }
+                
+                return Response({
+                    'exists': True,
+                    'consultation': consultation_data,
+                    'appointment_info': {
+                        'appointment_id': appointment.APPOINTMENT_ID,
+                        'patient_name': appointment.PAT_ID.Patient_Name if appointment.PAT_ID else 'Unknown',
+                        'token_no': appointment.TOKEN_NO,
+                        'status': appointment.Status
+                    },
+                    'warning': 'Using minimal fields due to database column issue'
+                })
+            else:
+                # Return appointment info even if no consultation exists
+                return Response({
+                    'exists': False,
+                    'message': 'No consultation found for this token',
+                    'appointment_info': {
+                        'appointment_id': appointment.APPOINTMENT_ID,
+                        'patient_name': appointment.PAT_ID.Patient_Name if appointment.PAT_ID else 'Unknown',
+                        'token_no': appointment.TOKEN_NO,
+                        'status': appointment.Status,
+                        'appointment_date': appointment.Date,
+                        'appointment_time': appointment.Time
+                    },
+                    'suggested_action': 'Create a new consultation for this appointment'
+                })
+            
+        except Exception as e:
+            # Log the error for debugging
+            import traceback
+            error_trace = traceback.format_exc()
+            print(f"ERROR in by_token endpoint: {str(e)}")
+            print(f"ERROR TRACEBACK:\n{error_trace}")
+            
+            # Check if it's the specific column error
+            if "Created_Date" in str(e):
+                return Response({
+                    'error': 'Database column issue: Created_Date column might not exist in database',
+                    'suggestion': 'Run migrations: python manage.py makemigrations && python manage.py migrate doctorapp',
+                    'exists': False,
+                    'debug_info': str(e)
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+            return Response({
+                'error': f"Server error: {str(e)}",
+                'exists': False,
+                'traceback': error_trace
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    # Add this to ConsultationDetailsViewSet in doctorapp/views.py
+    @action(detail=False, methods=['get'], url_path='by_appointment/(?P<appointment_id>[^/.]+)')
+    def by_appointment(self, request, appointment_id=None):
+        """
+        Get consultation by appointment ID
+        """
+        try:
+            # Try to find appointment by APPOINTMENT_ID
+            appointment = AppointmentDetail.objects.filter(APPOINTMENT_ID=appointment_id).first()
+            
+            if not appointment:
+                return Response({
+                    'exists': False,
+                    'error': f'Appointment with ID {appointment_id} not found'
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            # Get consultation for this appointment
+            consultation = ConsultationDetail.objects.filter(TOKEN_NO=appointment).first()
+            
+            if consultation:
+                # Return consultation data
+                consultation_data = {
+                    'CONSULT_ID': consultation.CONSULT_ID,
+                    'TOKEN_NO': consultation.TOKEN_NO_id,
+                    'DOC_ID': consultation.DOC_ID_id,
+                    'Symptoms': consultation.Symptoms,
+                    'Diagnosis': consultation.Diagnosis,
+                    'Description': consultation.Description,
+                    'Consultation_Status': consultation.Consultation_Status,
+                    'Consultation_Time': consultation.Consultation_Time,
+                    'appointment_info': {
+                        'appointment_id': appointment.APPOINTMENT_ID,
+                        'patient_name': appointment.PAT_ID.Patient_Name if appointment.PAT_ID else 'Unknown',
+                        'token_no': appointment.TOKEN_NO,
+                        'status': appointment.Status
+                    }
+                }
+                
+                return Response({
+                    'exists': True,
+                    'consultation': consultation_data
+                })
+            else:
+                # Return appointment info without consultation
+                return Response({
+                    'exists': False,
+                    'message': 'No consultation found for this appointment',
+                    'appointment_info': {
+                        'appointment_id': appointment.APPOINTMENT_ID,
+                        'patient_name': appointment.PAT_ID.Patient_Name if appointment.PAT_ID else 'Unknown',
+                        'token_no': appointment.TOKEN_NO,
+                        'status': appointment.Status,
+                        'date': appointment.Date,
+                        'time': appointment.Time,
+                        'doctor_id': appointment.DOC_ID.STAFF_ID if appointment.DOC_ID else None
+                    },
+                    'suggested_action': 'Create a new consultation'
+                })
+                
+        except Exception as e:
+            import traceback
+            print(f"Error in by_appointment endpoint: {str(e)}")
+            print(traceback.format_exc())
+            
+            return Response({
+                'error': f"Server error: {str(e)}",
+                'exists': False
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['get'])
+    def debug_token(self, request):
+        """Debug endpoint to check token existence"""
+        token_no = request.query_params.get('token_no')
+        
+        if not token_no:
+            return Response({'error': 'token_no parameter required'})
+        
+        # Check if token exists in AppointmentDetail
+        appointments = AppointmentDetail.objects.all()
+        all_tokens = list(appointments.values_list('TOKEN_NO', flat=True))
+        all_appointment_ids = list(appointments.values_list('APPOINTMENT_ID', flat=True))
+        
+        appointment_by_token = appointments.filter(TOKEN_NO=token_no).first()
+        appointment_by_id = appointments.filter(APPOINTMENT_ID=token_no).first()
+        
+        return Response({
+            'searching_for': token_no,
+            'all_tokens': all_tokens[:10],  # First 10
+            'all_appointment_ids': all_appointment_ids[:10],  # First 10
+            'found_by_token': appointment_by_token.APPOINTMENT_ID if appointment_by_token else None,
+            'found_by_appointment_id': appointment_by_id.APPOINTMENT_ID if appointment_by_id else None,
+            'appointment_exists': bool(appointment_by_token or appointment_by_id)
+        })
+
+    @action(detail=False, methods=['post'])
+    def start_consultation(self, request):
+        """
+        Start a new consultation from appointment data
+        """
+        try:
+            # Get data from request
+            token_no = request.data.get('token_no')
+            appointment_id = request.data.get('appointment_id')
+            doctor_id = request.data.get('doctor_id') or request.user.staff_detail.STAFF_ID
+        
+            # First, get the appointment
+            if appointment_id:
+                appointment = AppointmentDetail.objects.get(APPOINTMENT_ID=appointment_id)
+            elif token_no:
+                appointment = AppointmentDetail.objects.get(TOKEN_NO=token_no)
+            else:
+                return Response(
+                    {'error': 'Either token_no or appointment_id is required'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+            # Check if consultation already exists for this appointment
+            existing_consultation = ConsultationDetail.objects.filter(
+                TOKEN_NO=appointment
+            ).first()
+        
+            if existing_consultation:
+                serializer = self.get_serializer(existing_consultation)
+                return Response({
+                    'message': 'Existing consultation found',
+                    'consultation': serializer.data,
+                    'exists': True
+                })
+        
+            # Create new consultation
+            consultation = ConsultationDetail.objects.create(
+                TOKEN_NO=appointment,
+                DOC_ID=appointment.DOC_ID,
+                Symptoms='',
+                Diagnosis='',
+                Description='',
+                Consultation_Status='in_progress',
+                Consultation_Time=timezone.now()
+            )
+        
+            # Auto-generate CONSULT_ID if your model has save() method
+            if not consultation.CONSULT_ID:
+                # Generate simple ID
+                consultation.CONSULT_ID = f"CON-{consultation.id:04d}"
+                consultation.save()
+        
+            # Mark appointment as completed
+            appointment.Status = 'Completed'
+            appointment.save()
+        
+            serializer = self.get_serializer(consultation)
+            return Response({
+                'message': 'New consultation created',
+                'consultation': serializer.data,
+                'exists': False
+            }, status=status.HTTP_201_CREATED)
+        
+        except AppointmentDetail.DoesNotExist:
+            return Response(
+                {'error': 'Appointment not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    @action(detail=True, methods=['post'])
+    def complete_consultation(self, request, pk=None):
+        """
+        Complete a consultation and auto-generate bill
+        """
+        consultation = self.get_object()
+        
+        if consultation.Consultation_Status == 'completed':
+            return Response(
+                {'error': 'Consultation is already completed'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Update consultation status
+        consultation.Consultation_Status = 'completed'
+        consultation.save()
+        
+        # Update appointment status
+        appointment = consultation.TOKEN_NO
+        appointment.Status = 'Completed'
+        appointment.completed_at = timezone.now()
+        appointment.save()
+        
+        # Create auto-generated bill
+        bill_data = {
+            'CONSULT_ID': consultation.id,
+            'auto_generated': True,
+            'Notes': f'Auto-generated bill for completed consultation'
+        }
+        
+        bill_serializer = BillDetailsSerializer(data=bill_data)
+        if bill_serializer.is_valid():
+            bill = bill_serializer.save()
+            # Recalculate costs
+            bill.calculate_costs()
+            bill.save()
+            
+            # Get consultation data
+            consultation_serializer = self.get_serializer(consultation)
+            
+            return Response({
+                'message': 'Consultation completed successfully',
+                'consultation': consultation_serializer.data,
+                'bill': BillDetailsSerializer(bill).data,
+                'appointment_updated': True
+            })
+        
+        # If bill creation fails, still complete consultation
+        return Response({
+            'message': 'Consultation completed but bill creation failed',
+            'consultation': self.get_serializer(consultation).data,
+            'bill_error': bill_serializer.errors,
+            'appointment_updated': True
+        }, status=status.HTTP_201_CREATED)
+    
+    @action(detail=True, methods=['get'])
+    def bill_info(self, request, pk=None):
+        """
+        Get bill information for consultation
+        """
+        consultation = self.get_object()
+        
+        try:
+            bill = BillDetail.objects.get(CONSULT_ID=consultation)
+            serializer = BillDetailsSerializer(bill)
+            return Response(serializer.data)
+        except BillDetail.DoesNotExist:
+            # Calculate estimated bill
+            estimated_bill = {
+                'consultation_id': consultation.CONSULT_ID,
+                'consultation_fee': consultation.DOC_ID.Consultation_fees or 500.00,
+                'estimated_medicine_cost': 0,
+                'estimated_lab_test_cost': 0,
+                'total_estimated': consultation.DOC_ID.Consultation_fees or 500.00,
+                'has_bill': False
+            }
+            return Response(estimated_bill)
 
 # ============= PRESCRIPTIONS =============
 class PrescriptionViewSet(viewsets.ModelViewSet):
@@ -316,9 +745,14 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
 
 # ============= LAB TESTS =============
 class LabTestsViewSet(viewsets.ReadOnlyModelViewSet):
+    """ViewSet for doctors to view available lab tests"""
     queryset = LabTest.objects.all()
-    serializer_class = LabTestsSerializer
+    serializer_class = LabTechLabTestsSerializer  # Use the labtechapp serializer
     permission_classes = [IsAuthenticated, IsDoctorUser | IsAdminUser]
+
+    def get_queryset(self):
+        """Return all active lab tests"""
+        return LabTest.objects.all().order_by('Lab_Test_Name')
 
 # ============= LAB TEST REQUESTS =============
 class LabTestRequestViewSet(viewsets.ModelViewSet):
@@ -556,39 +990,79 @@ class LabResultsViewSet(viewsets.ReadOnlyModelViewSet):
         return Response([])
 
 # ============= DOCTOR AVAILABILITY =============
-class DoctorAvailabilityViewSet(viewsets.ViewSet):
-    """ViewSet for doctors to manage their availability"""
+class DoctorAvailabilityUpdateViewSet(viewsets.ViewSet):
+    """ViewSet for doctors to toggle their availability status"""
     permission_classes = [IsAuthenticated, IsDoctorUser]
     
     @action(detail=False, methods=['get'])
-    def my_availability(self, request):
-        """Get current doctor's availability status"""
+    def current_status(self, request):
+        """Get current availability status"""
         if hasattr(request.user, 'staff_detail'):
             doctor = request.user.staff_detail
             return Response({
                 'doctor_id': doctor.STAFF_ID,
                 'doctor_name': doctor.Name,
                 'current_status': doctor.Status,
-                'status_display': doctor.get_Status_display(),
-                'department': doctor.Department.Department_Name if doctor.Department else None,
-                'consultation_fees': doctor.Consultation_fees,
-                'can_change_status': True
+                'is_available': doctor.Status == 'Available',  # Note: Not 'UnAvailable'
+                'can_toggle': True,
+                'next_status': 'UnAvailable' if doctor.Status == 'Available' else 'Available'  # Match model
             })
         return Response({'error': 'Doctor profile not found'}, status=status.HTTP_404_NOT_FOUND)
     
     @action(detail=False, methods=['post'])
-    def set_availability(self, request):
-        """Set doctor's availability status"""
+    def toggle(self, request):
+        """Toggle between Available and UnAvailable status"""
+        if hasattr(request.user, 'staff_detail'):
+            doctor = request.user.staff_detail
+            current_status = doctor.Status
+            
+            # Note: The model only allows 'Available' or 'UnAvailable'
+            new_status = 'UnAvailable' if current_status == 'Available' else 'Available'
+            
+            doctor.Status = new_status
+            doctor.save()
+            
+            # Log the action
+            SystemLog.objects.create(
+                level='INFO',
+                log_type='USER',
+                user=request.user,
+                action=f'Doctor availability toggled from {current_status} to {new_status}',
+                details={
+                    'doctor_id': doctor.STAFF_ID,
+                    'doctor_name': doctor.Name,
+                    'old_status': current_status,
+                    'new_status': new_status
+                }
+            )
+            
+            return Response({
+                'success': True,
+                'message': f'Status changed from {current_status} to {new_status}',
+                'doctor_id': doctor.STAFF_ID,
+                'old_status': current_status,
+                'new_status': new_status,
+                'is_available': new_status == 'Available',
+                'next_status': 'UnAvailable' if new_status == 'Available' else 'Available'
+            })
+        
+        return Response({'error': 'Doctor profile not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    @action(detail=False, methods=['post'])
+    def set_status(self, request):
+        """Set specific status - only allow 'Available' or 'UnAvailable'"""
         if hasattr(request.user, 'staff_detail'):
             doctor = request.user.staff_detail
             new_status = request.data.get('status')
             
-            valid_statuses = ['Available', 'Busy', 'On Leave']
+            # IMPORTANT: Model only allows these two values
+            valid_statuses = ['Available', 'UnAvailable']
             if new_status not in valid_statuses:
                 return Response({
                     'error': f'Invalid status. Must be one of: {", ".join(valid_statuses)}'
                 }, status=status.HTTP_400_BAD_REQUEST)
             
+            old_status = doctor.Status
             doctor.Status = new_status
             doctor.save()
             
@@ -596,56 +1070,24 @@ class DoctorAvailabilityViewSet(viewsets.ViewSet):
                 level='INFO',
                 log_type='USER',
                 user=request.user,
-                action=f'Doctor availability changed to {new_status}',
+                action=f'Doctor availability changed from {old_status} to {new_status}',
                 details={
                     'doctor_id': doctor.STAFF_ID,
                     'doctor_name': doctor.Name,
-                    'old_status': request.data.get('old_status', 'Unknown'),
+                    'old_status': old_status,
                     'new_status': new_status
                 }
             )
             
             return Response({
                 'success': True,
-                'message': f'Availability status updated to {new_status}',
+                'message': f'Status changed from {old_status} to {new_status}',
                 'doctor_id': doctor.STAFF_ID,
-                'doctor_name': doctor.Name,
-                'status': doctor.Status,
-                'status_display': doctor.get_Status_display()
+                'old_status': old_status,
+                'new_status': new_status,
+                'is_available': new_status == 'Available'
             })
         
-        return Response({'error': 'Doctor profile not found'}, status=status.HTTP_404_NOT_FOUND)
-    
-    @action(detail=False, methods=['post'])
-    def set_available(self, request):
-        """Convenience method to set status to Available"""
-        if hasattr(request.user, 'staff_detail'):
-            doctor = request.user.staff_detail
-            doctor.Status = 'Available'
-            doctor.save()
-            
-            return Response({
-                'success': True,
-                'message': 'Status set to Available',
-                'doctor_id': doctor.STAFF_ID,
-                'status': doctor.Status
-            })
-        return Response({'error': 'Doctor profile not found'}, status=status.HTTP_404_NOT_FOUND)
-    
-    @action(detail=False, methods=['post'])
-    def set_busy(self, request):
-        """Convenience method to set status to Busy"""
-        if hasattr(request.user, 'staff_detail'):
-            doctor = request.user.staff_detail
-            doctor.Status = 'Busy'
-            doctor.save()
-            
-            return Response({
-                'success': True,
-                'message': 'Status set to Busy',
-                'doctor_id': doctor.STAFF_ID,
-                'status': doctor.Status
-            })
         return Response({'error': 'Doctor profile not found'}, status=status.HTTP_404_NOT_FOUND)
 
 # ============= AVAILABLE MEDICINES =============
@@ -654,37 +1096,33 @@ class AvailableMedicinesViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = MedicineDetailsSerializer
 
     def get_queryset(self):
-        # Only medicines with available stock (>0 and not expired)
-        return MedicineDetail.objects.filter(
-            stockdetails__Total_Stock_Availability__gt=0,
-            stockdetails__Earliest_Expiry__gt=date.today()
-        ).distinct()
+        # Return ALL medicines, not just those with stock
+        return MedicineDetail.objects.all().order_by('Medicine_Name')
 
     @action(detail=False, methods=['get'])
     def with_stock(self, request):
-        """Enhanced list: medicine + stock summary"""
-        stocks = StockDetails.objects.select_related(
-            'MED_ID'
-        ).filter(
-            Total_Stock_Availability__gt=0,
-            Earliest_Expiry__gt=date.today()
-        ).order_by('MED_ID__Medicine_Name')
-
+        """Get all medicines with stock information"""
+        medicines = MedicineDetail.objects.all().order_by('Medicine_Name')
+        
         data = []
-        for stock in stocks:
-            med = stock.MED_ID
-            data.append({
+        for med in medicines:
+            # Get stock info if it exists
+            stock = StockDetails.objects.filter(MED_ID=med).first()
+            
+            medicine_data = {
                 'MED_ID': med.MED_ID,
                 'Medicine_Name': med.Medicine_Name,
                 'Dosage': med.Dosage,
                 'Price_per_Unit': float(med.Price_per_Unit),
                 'stock': {
-                    'available': stock.Total_Stock_Availability,
-                    'earliest_expiry': stock.Earliest_Expiry,
-                    'days_until_expiry': (stock.Earliest_Expiry - date.today()).days,
-                    'is_low_stock': stock.Total_Stock_Availability < stock.Minimum_Stock_Level
+                    'available': stock.Total_Stock_Availability if stock else 0,
+                    'has_stock': stock.Total_Stock_Availability > 0 if stock else False,
+                    'is_low_stock': stock.Total_Stock_Availability < stock.Minimum_Stock_Level if stock else False,
+                    'earliest_expiry': stock.Earliest_Expiry if stock else None
                 }
-            })
+            }
+            data.append(medicine_data)
+        
         return Response(data)
 
 # ============= PATIENT SEARCH =============
@@ -774,3 +1212,121 @@ class PatientSearchViewSet(viewsets.ViewSet):
             serializer = AppointmentDetailsSerializer(appointments, many=True)
             return Response(serializer.data)
         return Response([])
+
+# ============= PATIENT MEDICAL INFO =============
+class PatientMedicalInfoDoctorViewSet(viewsets.ModelViewSet):
+    """
+    Doctor-specific ViewSet for managing patient medical information.
+    """
+    queryset = PatientMedicalInfo.objects.all()
+    serializer_class = PatientMedicalInfoSerializer
+    permission_classes = [IsAuthenticated, IsDoctorUser]  # Only doctors can access
+    
+    def get_queryset(self):
+        """Doctors can only see medical info for their patients"""
+        queryset = super().get_queryset()
+        
+        # Filter by patient if specified
+        patient_id = self.request.query_params.get('patient_id')
+        if patient_id:
+            queryset = queryset.filter(patient__PAT_ID=patient_id)
+        
+        return queryset
+    
+    @action(detail=False, methods=['get'])
+    def by_patient(self, request):
+        """Get medical info for specific patient"""
+        patient_id = request.query_params.get('patient_id')
+        if not patient_id:
+            return Response({'error': 'patient_id parameter is required'}, status=400)
+        
+        try:
+            medical_info = PatientMedicalInfo.objects.get(patient__PAT_ID=patient_id)
+            serializer = self.get_serializer(medical_info)
+            return Response(serializer.data)
+        except PatientMedicalInfo.DoesNotExist:
+            # Return empty structure if no medical info exists
+            return Response({
+                'patient': patient_id,
+                'exists': False,
+                'message': 'No medical information found for this patient'
+            })
+    
+    @action(detail=False, methods=['post'])
+    def update_vitals(self, request):
+        """Update only vital signs for a patient"""
+        patient_id = request.data.get('patient_id')
+        if not patient_id:
+            return Response({'error': 'patient_id is required'}, status=400)
+        
+        try:
+            medical_info = PatientMedicalInfo.objects.get(patient__PAT_ID=patient_id)
+            # Update only vital fields
+            vital_fields = ['height', 'weight', 'blood_pressure', 'pulse', 
+                          'temperature', 'respiratory_rate', 'oxygen_saturation']
+            
+            for field in vital_fields:
+                if field in request.data:
+                    setattr(medical_info, field, request.data[field])
+            
+            medical_info.last_updated_by = request.user.staff_detail
+            medical_info.save()
+            
+            serializer = self.get_serializer(medical_info)
+            return Response(serializer.data)
+        except PatientMedicalInfo.DoesNotExist:
+            # Create new medical info if doesn't exist
+            serializer = self.get_serializer(data=request.data)
+            if serializer.is_valid():
+                # Get patient object
+                from receptionistapp.models import PatientDetail
+                patient = PatientDetail.objects.get(PAT_ID=patient_id)
+                serializer.save(patient=patient, last_updated_by=request.user.staff_detail)
+                return Response(serializer.data, status=201)
+            return Response(serializer.errors, status=400)
+
+# ============= DOCTOR DASHBOARD =============
+class DoctorDashboardViewSet(viewsets.ViewSet):
+    """Dashboard stats for doctors"""
+    permission_classes = [IsAuthenticated, IsDoctorUser]
+    
+    @action(detail=False, methods=['get'])
+    def stats(self, request):
+        """Get dashboard statistics"""
+        if hasattr(request.user, 'staff_detail'):
+            doctor_id = request.user.staff_detail.STAFF_ID
+            today = date.today()
+            
+            # Count today's appointments
+            today_appointments = AppointmentDetail.objects.filter(
+                DOC_ID=doctor_id,
+                Date=today
+            ).count()
+            
+            # Count today's consultations
+            today_consultations = ConsultationDetail.objects.filter(
+                DOC_ID=doctor_id,
+                Consultation_Time__date=today
+            ).count()
+            
+            # Count pending lab results
+            pending_results = LabTestRequestDetail.objects.filter(
+                CONSULT_ID__DOC_ID=doctor_id,
+                Status__in=['Requested', 'In Progress']
+            ).count()
+            
+            # Count upcoming appointments
+            upcoming_appointments = AppointmentDetail.objects.filter(
+                DOC_ID=doctor_id,
+                Date__gte=today,
+                Status='Scheduled'
+            ).count()
+            
+            return Response({
+                'today_appointments': today_appointments,
+                'today_consultations': today_consultations,
+                'pending_lab_results': pending_results,
+                'upcoming_appointments': upcoming_appointments,
+                'is_available': request.user.staff_detail.Status == 'Available'
+            })
+        return Response({'error': 'Doctor not found'}, status=status.HTTP_404_NOT_FOUND)

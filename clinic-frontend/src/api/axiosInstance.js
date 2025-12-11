@@ -22,64 +22,64 @@ const axiosInstance = axios.create({
 if (isBrowser) {
   // Request Interceptor
   axiosInstance.interceptors.request.use(
-    (config) => {
-      try {
-        const token = localStorage.getItem("access");
-        if (token) {
-          config.headers.Authorization = `Bearer ${token}`;
-        }
-      } catch (error) {
-        console.warn("Failed to get token from localStorage:", error);
+  (config) => {
+    try {
+      // Try multiple possible token storage keys
+      const token = localStorage.getItem("access") || 
+                   localStorage.getItem("access_token") ||
+                   localStorage.getItem("token");
+      
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
       }
-      return config;
-    },
-    (error) => {
-      console.error("Request interceptor error:", error);
-      return Promise.reject(error);
+    } catch (error) {
+      console.warn("Failed to get token from localStorage:", error);
     }
-  );
+    return config;
+  },
+  (error) => {
+    console.error("Request interceptor error:", error);
+    return Promise.reject(error);
+  }
+);
 
   // Response Interceptor
   axiosInstance.interceptors.response.use(
-    (response) => {
-      return response;
-    },
-    async (error) => {
-      const originalRequest = error.config;
-      
-      // Log the error for debugging
-      console.error("API Error:", {
-        url: error.config?.url,
-        method: error.config?.method,
-        status: error.response?.status,
-        data: error.response?.data,
-        message: error.message
-      });
-      
-      // Skip if already retried or not 401
-      if (error.response?.status !== 401 || originalRequest._retry) {
-        return Promise.reject(error);
-      }
-      
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
+    
+    console.error("API Error:", {
+      url: error.config?.url,
+      method: error.config?.method,
+      status: error.response?.status,
+      data: error.response?.data,
+      message: error.message
+    });
+    
+    // If 401 and not already retried
+    if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
       
       try {
-        const refreshToken = localStorage.getItem("refresh");
+        // Try multiple possible refresh token keys
+        const refreshToken = localStorage.getItem("refresh") || 
+                            localStorage.getItem("refresh_token");
+        
         if (!refreshToken) {
           throw new Error("No refresh token");
         }
         
-        // Use axios directly (not axiosInstance) to avoid infinite loop
-        const response = await axios.post(
+        // Use a fresh axios instance to avoid loops
+        const refreshResponse = await axios.post(
           `${API_BASE_URL}/api/auth/token/refresh/`,
-          { refresh: refreshToken },
-          {
-            headers: { "Content-Type": "application/json" }
-          }
+          { refresh: refreshToken }
         );
         
-        const newAccessToken = response.data.access;
+        const newAccessToken = refreshResponse.data.access;
+        // Save with consistent key
         localStorage.setItem("access", newAccessToken);
+        localStorage.setItem("access_token", newAccessToken); // Backup
         
         // Update the original request header
         originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
@@ -87,24 +87,20 @@ if (isBrowser) {
         
       } catch (refreshError) {
         console.warn("Token refresh failed:", refreshError);
-        try {
-          localStorage.removeItem("access");
-          localStorage.removeItem("refresh");
-          localStorage.removeItem("user");
-          localStorage.removeItem("staff_detail");
-        } catch (storageError) {
-          console.warn("Failed to clear localStorage:", storageError);
-        }
+        // Clear all possible token keys
+        ['access', 'access_token', 'refresh', 'refresh_token', 'token'].forEach(key => {
+          localStorage.removeItem(key);
+        });
         
-        // Only redirect if we're in browser
         if (isBrowser) {
           window.location.href = "/login";
         }
-        
-        return Promise.reject(refreshError);
       }
     }
-  );
+    
+    return Promise.reject(error);
+  }
+);
 }
 
 // Add a test function

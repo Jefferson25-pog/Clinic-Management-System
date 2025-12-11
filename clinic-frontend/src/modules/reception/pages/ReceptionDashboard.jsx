@@ -1,12 +1,11 @@
-// src/modules/reception/pages/ReceptionDashboard.jsx
+// src/modules/reception/pages/ReceptionDashboard.jsx - UPDATED VERSION
 import React, { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useAuth } from "../../../context/AuthContext";
 import { receptionApi } from "../services/receptionApi";
 
 const ReceptionDashboard = () => {
   const { user, staffDetail } = useAuth();
-  const navigate = useNavigate();
   
   const [stats, setStats] = useState({
     todayAppointments: 0,
@@ -24,78 +23,84 @@ const ReceptionDashboard = () => {
     appointments: true,
     patients: true
   });
-  const [searchQuery, setSearchQuery] = useState("");
+  
+  const [error, setError] = useState("");
 
-  // Quick action tiles - Updated to link to management pages
-  const quickActions = [
-    {
-      title: "Manage Patients",
-      description: "Add, edit, view all patients",
-      to: "/reception/patients/list",
-      icon: "bi-people",
-      color: "primary",
-      badge: "Manage"
-    },
-    {
-      title: "Schedule Appointments",
-      description: "Create and manage appointments",
-      to: "/reception/appointments/list",
-      icon: "bi-calendar-week",
-      color: "success",
-      badge: "Today"
-    },
-    {
-      title: "Process Bills",
-      description: "View and manage payments",
-      to: "/reception/billing/list",
-      icon: "bi-credit-card",
-      color: "warning",
-      badge: `${stats.pendingBills} pending`
-    },
-    {
-      title: "Quick Search",
-      description: "Find anything quickly",
-      to: "#",
-      icon: "bi-search",
-      color: "info",
-      badge: "Search",
-      onClick: () => document.getElementById('globalSearch').focus()
-    }
-  ];
-
-  // Dashboard stats cards
+  // Dashboard stats cards - Updated to match admin dashboard style
   const statCards = [
     {
       title: "Today's Appointments",
       value: stats.todayAppointments,
       icon: "bi-calendar-check",
       color: "primary",
-      link: "/reception/appointments/list?filter=today",
-      linkText: "View Schedule"
+      description: "Appointments scheduled for today"
     },
     {
       title: "Active Doctors",
       value: stats.activeDoctors,
       icon: "bi-person-check",
       color: "success",
-      link: "/reception/doctors",
-      linkText: "Check Availability"
+      description: "Doctors available now"
     },
     {
       title: "Total Patients",
       value: stats.totalPatients,
       icon: "bi-people",
       color: "warning",
-      link: "/reception/patients/list",
-      linkText: "Manage Patients"
+      description: "Registered patients in system"
     },
     {
       title: "Pending Bills",
       value: stats.pendingBills,
       icon: "bi-cash-stack",
       color: "danger",
-      link: "/reception/billing/list?status=pending",
-      linkText: "Process Payments"
+      description: "Bills awaiting payment"
+    }
+  ];
+
+  // Admin tiles style buttons for reception
+  const receptionTiles = [
+    {
+      title: "Patient Management",
+      description: "Add, edit, and manage patient records",
+      to: "/reception/patients/list",
+      icon: "bi-people",
+      color: "primary"
+    },
+    {
+      title: "Appointments",
+      description: "Schedule and manage appointments",
+      to: "/reception/appointments/list",
+      icon: "bi-calendar-week",
+      color: "info"
+    },
+    {
+      title: "Billing & Payments",
+      description: "Process bills and payments",
+      to: "/reception/billing/list",
+      icon: "bi-credit-card",
+      color: "success"
+    },
+    {
+      title: "Doctor Availability",
+      description: "Check doctor schedules and availability",
+      to: "/reception/doctors",
+      icon: "bi-person-badge",
+      color: "warning"
+    },
+    {
+      title: "Today's Schedule",
+      description: "View today's appointments and tokens",
+      to: "/reception/appointments/list?filter=today",
+      icon: "bi-calendar-day",
+      color: "secondary"
+    },
+    {
+      title: "Reports",
+      description: "Generate daily reports and summaries",
+      to: "/reception/reports",
+      icon: "bi-graph-up",
+      color: "danger"
     }
   ];
 
@@ -103,9 +108,11 @@ const ReceptionDashboard = () => {
   const fetchDashboardData = async () => {
     try {
       setLoading({ stats: true, appointments: true, patients: true });
+      setError("");
+      
+      const today = new Date().toISOString().split('T')[0];
       
       // Fetch today's appointments
-      const today = new Date().toISOString().split('T')[0];
       const appointmentsRes = await receptionApi.getAppointments({ 
         date: today,
         status: 'Scheduled'
@@ -169,38 +176,20 @@ const ReceptionDashboard = () => {
       
     } catch (error) {
       console.error("Error fetching dashboard data:", error);
+      setError("Failed to load some dashboard data. Some features may be limited.");
     } finally {
       setLoading({ stats: false, appointments: false, patients: false });
     }
   };
 
-  // Handle quick patient registration
-  const handleQuickRegistration = async (e) => {
-    e.preventDefault();
-    const formData = new FormData(e.target);
-    const patientData = {
-      Patient_Name: formData.get('quick_name'),
-      DOB: formData.get('quick_dob') || null,
-      Phone_Number: formData.get('quick_phone'),
-      Address: formData.get('quick_address') || '',
-      Email: formData.get('quick_email') || ''
-    };
-    
+  // Manual refresh function
+  const handleManualRefresh = async () => {
     try {
-      await receptionApi.createPatient(patientData);
-      alert('Patient registered successfully!');
-      e.target.reset();
-      fetchDashboardData();
+      setError("");
+      await fetchDashboardData();
     } catch (error) {
-      alert('Error registering patient: ' + (error.response?.data?.message || error.message));
-    }
-  };
-
-  // Handle patient search
-  const handlePatientSearch = async (e) => {
-    e.preventDefault();
-    if (searchQuery.trim()) {
-      navigate(`/reception/patients?search=${encodeURIComponent(searchQuery)}`);
+      console.error("Error in manual refresh:", error);
+      setError("Failed to refresh data");
     }
   };
 
@@ -220,8 +209,8 @@ const ReceptionDashboard = () => {
   useEffect(() => {
     fetchDashboardData();
     
-    // Refresh every 60 seconds
-    const interval = setInterval(fetchDashboardData, 60000);
+    // Refresh every 30 seconds for real-time updates
+    const interval = setInterval(fetchDashboardData, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -261,94 +250,85 @@ const ReceptionDashboard = () => {
   };
 
   return (
-    <div className="container-fluid">
-      
+    <div>
       {/* Header */}
-      <div className="row mb-4">
-        <div className="col-lg-8">
-          <div className="d-flex justify-content-between align-items-center">
-            <div>
-              <h1 className="h2 mb-1">Reception Dashboard</h1>
-              <p className="text-muted mb-0">
-                Welcome back, <strong>{staffDetail?.Name || user?.username || 'Receptionist'}</strong>
-              </p>
-            </div>
-            <div className="text-end">
-              <div className="d-flex align-items-center">
-                <div className="me-3">
-                  <small className="text-muted d-block">Today is</small>
-                  <strong>{new Date().toLocaleDateString('en-US', { 
-                    weekday: 'long', 
-                    year: 'numeric', 
-                    month: 'long', 
-                    day: 'numeric' 
-                  })}</strong>
-                </div>
-                <div className="card bg-primary text-white shadow-sm">
-                  <div className="card-body py-2 px-3">
-                    <small className="opacity-75">Next Token</small>
-                    <h4 className="mb-0">
-                      {loading.stats ? (
-                        <span className="placeholder col-6 bg-white bg-opacity-50"></span>
-                      ) : (
-                        `TOK-${todayToken.tokenNo.toString().padStart(4, '0')}`
-                      )}
-                    </h4>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+      <div className="d-flex justify-content-between align-items-center mb-4 flex-wrap">
+        <div className="mb-2 mb-md-0">
+          <h3 className="mb-1">Reception Dashboard</h3>
+          <p className="text-muted mb-0">
+            Welcome back, <strong>{staffDetail?.Name || user?.username || 'Receptionist'}</strong>
+          </p>
         </div>
-        <div className="col-lg-4 mt-3 mt-lg-0">
-          <div className="input-group">
-            <input
-              type="text"
-              id="globalSearch"
-              className="form-control"
-              placeholder="Search patients, appointments, bills..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handlePatientSearch(e)}
-            />
-            <button 
-              className="btn btn-primary"
-              type="button"
-              onClick={handlePatientSearch}
-            >
-              <i className="bi bi-search"></i>
-            </button>
+        <div className="text-end d-flex flex-wrap gap-2 align-items-center">
+          <div>
+            <small className="text-muted d-block">
+              <i className="bi bi-calendar-check me-1"></i>
+              {new Date().toLocaleDateString('en-US', { 
+                weekday: 'long', 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric' 
+              })}
+            </small>
+            <small className="text-muted">
+              <i className="bi bi-clock me-1"></i>
+              Auto-refresh: 30s
+            </small>
           </div>
         </div>
       </div>
 
-      {/* Stats Cards */}
+      {/* Error Display */}
+      {error && (
+        <div className="alert alert-danger alert-dismissible fade show mb-4" role="alert">
+          <i className="bi bi-exclamation-triangle me-2"></i>
+          <strong>Error:</strong> {error}
+          <button 
+            type="button" 
+            className="btn-close" 
+            onClick={() => setError("")}
+          ></button>
+        </div>
+      )}
+
+      {/* Quick Stats - Updated to match AdminDashboard style */}
       <div className="row g-3 mb-4">
         {statCards.map((stat, index) => (
-          <div key={index} className="col-xl-3 col-lg-6">
-            <div className={`card border-start border-${stat.color} border-4 shadow-sm h-100`}>
+          <div key={index} className="col-xl-3 col-lg-4 col-md-6 col-sm-6">
+            <div className={`card bg-${stat.color} bg-opacity-10 border-${stat.color} border-opacity-25 h-100`}>
               <div className="card-body">
                 <div className="d-flex justify-content-between">
                   <div>
                     <h6 className="text-muted mb-1">{stat.title}</h6>
-                    <h2 className="mb-0">
+                    <h3 className="mb-0">
                       {loading.stats ? (
-                        <span className="placeholder col-6"></span>
+                        <span className={`placeholder col-6 bg-${stat.color} bg-opacity-25`}></span>
                       ) : (
                         stat.value.toLocaleString()
                       )}
-                    </h2>
+                    </h3>
+                    <div className="mt-2">
+                      <small className="text-muted">
+                        {stat.description}
+                      </small>
+                    </div>
                   </div>
                   <div className="avatar-sm">
-                    <div className={`avatar-title bg-${stat.color} bg-opacity-10 rounded`}>
+                    <div className={`avatar-title bg-${stat.color} bg-opacity-25 rounded`}>
                       <i className={`bi ${stat.icon} fs-4 text-${stat.color}`}></i>
                     </div>
                   </div>
                 </div>
-                <div className="mt-3">
-                  <Link to={stat.link} className={`btn btn-outline-${stat.color} btn-sm`}>
-                    <i className="bi bi-arrow-right me-1"></i> {stat.linkText}
-                  </Link>
+              </div>
+              <div className="card-footer bg-transparent border-0 py-2">
+                <div className="d-flex justify-content-between align-items-center">
+                  <small className="text-muted">
+                    <i className="bi bi-info-circle me-1"></i>
+                    {stat.title === "Today's Appointments" && `Next Token: TOK-${todayToken.tokenNo.toString().padStart(4, '0')}`}
+                    {stat.title === "Active Doctors" && "Available now"}
+                    {stat.title === "Total Patients" && "Registered in system"}
+                    {stat.title === "Pending Bills" && "Awaiting payment"}
+                  </small>
                 </div>
               </div>
             </div>
@@ -356,110 +336,216 @@ const ReceptionDashboard = () => {
         ))}
       </div>
 
-      {/* Quick Actions */}
-      <div className="row mb-4">
-        <div className="col-12">
-          <div className="card shadow-sm">
-            <div className="card-header bg-white border-0">
+      {/* Data Status Bar */}
+      <div className="alert alert-light border mb-4">
+        <div className="row align-items-center">
+          <div className="col-md-6">
+            <small className="text-muted">
+              <i className="bi bi-info-circle me-1"></i>
+              Data Status: 
+              <span className={`ms-2 badge ${loading.stats || loading.appointments || loading.patients ? 'bg-warning' : 'bg-success'}`}>
+                {loading.stats || loading.appointments || loading.patients ? 'Loading...' : 'Live'}
+              </span>
+              <span className="ms-3">
+                <i className="bi bi-ticket-detailed me-1"></i>
+                Next Token: 
+                <span className="ms-1 badge bg-primary">
+                  TOK-{loading.stats ? '...' : todayToken.tokenNo.toString().padStart(4, '0')}
+                </span>
+              </span>
+            </small>
+          </div>
+          <div className="col-md-6 text-md-end">
+            <small className="text-muted">
+              Last updated: {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+            </small>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content Grid */}
+      <div className="row g-4">
+        {/* Reception Tiles */}
+        <div className="col-xl-8 col-lg-7">
+          <div className="card shadow-sm border-0 h-100">
+            <div className="card-header bg-transparent border-0 pb-0">
               <h5 className="mb-0">
-                <i className="bi bi-lightning me-2"></i>
+                <i className="bi bi-speedometer2 me-2"></i>
                 Quick Actions
               </h5>
-              <p className="text-muted mb-0 small">Frequently used tasks</p>
+              <p className="text-muted mb-0 small">Access common reception tasks</p>
             </div>
             <div className="card-body">
               <div className="row g-3">
-                {quickActions.map((action, index) => (
-                  <div key={index} className="col-xl-3 col-lg-6">
-                    {action.to === '#' ? (
-                      <div 
-                        className="card border-0 shadow-sm hover-lift transition-all h-100 cursor-pointer"
-                        onClick={action.onClick}
-                      >
+                {receptionTiles.map((tile) => (
+                  <div key={tile.title} className="col-12 col-md-6 col-lg-4">
+                    <Link to={tile.to} className="text-decoration-none text-dark">
+                      <div className="card border-0 shadow-sm h-100 hover-lift transition-all">
                         <div className="card-body">
-                          <div className="d-flex align-items-start">
-                            <div className={`bg-${action.color} bg-opacity-10 rounded-circle p-3 me-3`}>
-                              <i className={`bi ${action.icon} fs-4 text-${action.color}`}></i>
+                          <div className="d-flex align-items-center mb-3">
+                            <div className={`bg-${tile.color} bg-opacity-10 rounded-circle p-3 me-3`}>
+                              <i className={`bi ${tile.icon} fs-4 text-${tile.color}`}></i>
                             </div>
-                            <div className="flex-grow-1">
-                              <div className="d-flex justify-content-between align-items-start">
-                                <h6 className="mb-1 fw-semibold">{action.title}</h6>
-                                <span className={`badge bg-${action.color}`}>
-                                  {action.badge}
-                                </span>
-                              </div>
-                              <p className="text-muted small mb-0">{action.description}</p>
+                            <div>
+                              <h6 className="card-title mb-0 fw-semibold">{tile.title}</h6>
                             </div>
                           </div>
+                          <p className="text-muted small mb-0">{tile.description}</p>
                         </div>
                         <div className="card-footer bg-transparent border-0 pt-0">
                           <div className="d-flex justify-content-between align-items-center">
-                            <span className="text-muted small">Click to search</span>
-                            <i className={`bi bi-arrow-right text-${action.color}`}></i>
+                            <span className="text-muted small">Click to open</span>
+                            <i className={`bi bi-arrow-right text-${tile.color}`}></i>
                           </div>
                         </div>
                       </div>
-                    ) : (
-                      <Link to={action.to} className="text-decoration-none text-dark">
-                        <div className="card border-0 shadow-sm hover-lift transition-all h-100">
-                          <div className="card-body">
-                            <div className="d-flex align-items-start">
-                              <div className={`bg-${action.color} bg-opacity-10 rounded-circle p-3 me-3`}>
-                                <i className={`bi ${action.icon} fs-4 text-${action.color}`}></i>
-                              </div>
-                              <div className="flex-grow-1">
-                                <div className="d-flex justify-content-between align-items-start">
-                                  <h6 className="mb-1 fw-semibold">{action.title}</h6>
-                                  <span className={`badge bg-${action.color}`}>
-                                    {action.badge}
-                                  </span>
-                                </div>
-                                <p className="text-muted small mb-0">{action.description}</p>
-                              </div>
-                            </div>
-                          </div>
-                          <div className="card-footer bg-transparent border-0 pt-0">
-                            <div className="d-flex justify-content-between align-items-center">
-                              <span className="text-muted small">Click to open</span>
-                              <i className={`bi bi-arrow-right text-${action.color}`}></i>
-                            </div>
-                          </div>
-                        </div>
-                      </Link>
-                    )}
+                    </Link>
                   </div>
                 ))}
               </div>
             </div>
           </div>
         </div>
+
+        {/* Sidebar with Recent Activity */}
+        <div className="col-xl-4 col-lg-5">
+          {/* Recent Patients Card */}
+          <div className="card shadow-sm border-0 mb-4">
+            <div className="card-header bg-transparent border-0 d-flex justify-content-between align-items-center">
+              <h5 className="mb-0">
+                <i className="bi bi-clock-history me-2"></i>
+                Recent Patients
+              </h5>
+              <span className="badge bg-primary">
+                {loading.patients ? (
+                  <span className="spinner-border spinner-border-sm"></span>
+                ) : (
+                  recentPatients.length
+                )}
+              </span>
+            </div>
+            <div className="card-body p-0">
+              {loading.patients ? (
+                <div className="text-center py-5">
+                  <div className="spinner-border text-primary" role="status">
+                    <span className="visually-hidden">Loading...</span>
+                  </div>
+                  <p className="mt-3 text-muted">Loading recent patients...</p>
+                </div>
+              ) : recentPatients.length === 0 ? (
+                <div className="text-center py-5">
+                  <i className="bi bi-people display-6 text-muted"></i>
+                  <p className="mt-3 text-muted">No recent patients</p>
+                </div>
+              ) : (
+                <div className="list-group list-group-flush">
+                  {recentPatients.map((patient) => (
+                    <div 
+                      key={patient.PAT_ID || patient.id}
+                      className="list-group-item list-group-item-action border-0 py-3"
+                    >
+                      <div className="d-flex align-items-start">
+                        <div className="flex-shrink-0">
+                          <div className="avatar-sm rounded-circle bg-primary bg-opacity-10 d-flex align-items-center justify-content-center">
+                            <i className="bi bi-person fs-5 text-primary"></i>
+                          </div>
+                        </div>
+                        <div className="flex-grow-1 ms-3">
+                          <div className="d-flex justify-content-between align-items-start">
+                            <div>
+                              <h6 className="mb-0">{patient.Patient_Name}</h6>
+                              <small className="text-muted">
+                                <i className="bi bi-telephone me-1"></i>
+                                {patient.Phone_Number || 'No phone'}
+                                <span className="ms-2">
+                                  <i className="bi bi-calendar me-1"></i>
+                                  {calculateAge(patient.DOB)} yrs
+                                </span>
+                              </small>
+                            </div>
+                            <div className="text-end">
+                              <small className="text-muted d-block">
+                                ID: {patient.PAT_ID || 'N/A'}
+                              </small>
+                              <Link 
+                                to={`/reception/patients/view/${patient.PAT_ID || patient.id}`}
+                                className="btn btn-sm btn-outline-primary mt-1"
+                              >
+                                <i className="bi bi-eye"></i>
+                              </Link>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="card-footer bg-transparent border-0">
+              <Link to="/reception/patients/list" className="btn btn-outline-primary w-100">
+                <i className="bi bi-people me-1"></i>View All Patients
+              </Link>
+            </div>
+          </div>
+
+          {/* Refresh Button Card */}
+          <div className="card shadow-sm border-0">
+            <div className="card-body text-center">
+              <div className="avatar-lg mx-auto mb-3">
+                <div className="avatar-title bg-light rounded-circle">
+                  <i className="bi bi-arrow-clockwise fs-2 text-primary"></i>
+                </div>
+              </div>
+              <h5 className="card-title">Refresh Dashboard</h5>
+              <p className="text-muted small mb-3">
+                Update all dashboard data manually
+              </p>
+              <button 
+                className="btn btn-primary w-100"
+                onClick={handleManualRefresh}
+                disabled={loading.stats || loading.appointments || loading.patients}
+              >
+                {loading.stats || loading.appointments || loading.patients ? (
+                  <>
+                    <span className="spinner-border spinner-border-sm me-2"></span>
+                    Refreshing...
+                  </>
+                ) : (
+                  <>
+                    <i className="bi bi-arrow-clockwise me-2"></i>Refresh Now
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
-      {/* Main Content */}
-      <div className="row g-4">
-        {/* Today's Appointments */}
-        <div className="col-xl-8">
-          <div className="card shadow-sm h-100">
-            <div className="card-header bg-white border-0 d-flex justify-content-between align-items-center">
+      {/* Today's Appointments Table */}
+      <div className="row mt-4">
+        <div className="col-12">
+          <div className="card shadow-sm border-0">
+            <div className="card-header bg-transparent border-0 d-flex justify-content-between align-items-center">
               <div>
                 <h5 className="mb-0">
                   <i className="bi bi-calendar-day me-2"></i>
                   Today's Appointments
                 </h5>
                 <p className="text-muted mb-0 small">
-                  {stats.todayAppointments} appointments scheduled for today
+                  {loading.appointments ? 'Loading...' : `${stats.todayAppointments} appointments scheduled for today`}
                 </p>
               </div>
               <div>
                 <button 
                   className="btn btn-primary btn-sm me-2"
-                  onClick={() => navigate('/reception/appointments/create')}
+                  onClick={() => window.location.href = '/reception/appointments/create'}
                 >
                   <i className="bi bi-plus-circle me-1"></i> New Appointment
                 </button>
                 <button 
                   className="btn btn-outline-secondary btn-sm"
-                  onClick={fetchDashboardData}
+                  onClick={handleManualRefresh}
                   disabled={loading.appointments}
                 >
                   <i className="bi bi-arrow-clockwise"></i>
@@ -480,7 +566,7 @@ const ReceptionDashboard = () => {
                   <p className="mt-3 text-muted">No appointments scheduled for today</p>
                   <button 
                     className="btn btn-primary mt-2"
-                    onClick={() => navigate('/reception/appointments/create')}
+                    onClick={() => window.location.href = '/reception/appointments/create'}
                   >
                     <i className="bi bi-plus-circle me-1"></i> Schedule First Appointment
                   </button>
@@ -504,7 +590,7 @@ const ReceptionDashboard = () => {
                         <tr key={appointment.TOKEN_NO || appointment.id}>
                           <td className="align-middle">
                             <strong className="text-primary">
-                              APID-{(appointment.TOKEN_NO || appointment.id).toString().padStart(4, '0')}
+                              {(appointment.TOKEN_NO || appointment.id).toString().padStart(4, '0')}
                             </strong>
                           </td>
                           <td className="align-middle">
@@ -547,16 +633,9 @@ const ReceptionDashboard = () => {
                             <div className="btn-group btn-group-sm">
                               <button 
                                 className="btn btn-outline-primary"
-                                onClick={() => navigate(`/reception/appointments/view/${appointment.TOKEN_NO || appointment.id}`)}
+                                onClick={() => window.location.href = `/reception/appointments/view/${appointment.TOKEN_NO || appointment.id}`}
                               >
                                 <i className="bi bi-eye"></i>
-                              </button>
-                              <button 
-                                className="btn btn-outline-warning"
-                                onClick={() => navigate(`/reception/appointments/edit/${appointment.TOKEN_NO || appointment.id}/edit`)}
-                                disabled={appointment.Status === 'Completed' || appointment.Status === 'Cancelled'}
-                              >
-                                <i className="bi bi-pencil"></i>
                               </button>
                               <button 
                                 className="btn btn-outline-danger"
@@ -581,148 +660,9 @@ const ReceptionDashboard = () => {
             </div>
           </div>
         </div>
-
-        {/* Quick Actions Sidebar */}
-        <div className="col-xl-4">
-          {/* Quick Patient Registration */}
-          <div className="card shadow-sm mb-4">
-            <div className="card-header bg-white border-0">
-              <h5 className="mb-0">
-                <i className="bi bi-person-plus me-2"></i>
-                Quick Patient Registration
-              </h5>
-              <p className="text-muted mb-0 small">Register new patient in 30 seconds</p>
-            </div>
-            <div className="card-body">
-              <form onSubmit={handleQuickRegistration}>
-                <div className="mb-3">
-                  <label className="form-label">Full Name *</label>
-                  <input 
-                    type="text" 
-                    name="quick_name"
-                    className="form-control" 
-                    placeholder="Patient's full name"
-                    required
-                  />
-                </div>
-                <div className="row g-2 mb-3">
-                  <div className="col-6">
-                    <label className="form-label">Date of Birth</label>
-                    <input 
-                      type="date" 
-                      name="quick_dob"
-                      className="form-control" 
-                      max={new Date().toISOString().split('T')[0]}
-                    />
-                  </div>
-                  <div className="col-6">
-                    <label className="form-label">Phone *</label>
-                    <input 
-                      type="tel" 
-                      name="quick_phone"
-                      className="form-control" 
-                      placeholder="9876543210"
-                      pattern="[0-9]{10}"
-                      required
-                    />
-                  </div>
-                </div>
-                <div className="mb-3">
-                  <label className="form-label">Address</label>
-                  <textarea 
-                    name="quick_address"
-                    className="form-control" 
-                    rows="2"
-                    placeholder="Current address"
-                  ></textarea>
-                </div>
-                <div className="mb-3">
-                  <label className="form-label">Email (Optional)</label>
-                  <input 
-                    type="email" 
-                    name="quick_email"
-                    className="form-control" 
-                    placeholder="patient@email.com"
-                  />
-                </div>
-                <div className="d-grid gap-2">
-                  <button type="submit" className="btn btn-primary">
-                    <i className="bi bi-person-plus me-1"></i> Register Patient
-                  </button>
-                  <Link to="/reception/patients/add" className="btn btn-outline-secondary">
-                    <i className="bi bi-file-earmark-text me-1"></i> Advanced Registration
-                  </Link>
-                </div>
-              </form>
-            </div>
-          </div>
-
-          {/* Recent Patients */}
-          <div className="card shadow-sm">
-            <div className="card-header bg-white border-0">
-              <h5 className="mb-0">
-                <i className="bi bi-clock-history me-2"></i>
-                Recent Patients
-              </h5>
-              <span className="badge bg-primary">{recentPatients.length}</span>
-            </div>
-            <div className="card-body p-0">
-              {loading.patients ? (
-                <div className="text-center py-3">
-                  <div className="spinner-border spinner-border-sm text-primary" role="status">
-                    <span className="visually-hidden">Loading...</span>
-                  </div>
-                </div>
-              ) : recentPatients.length === 0 ? (
-                <div className="text-center py-4">
-                  <i className="bi bi-people display-6 text-muted"></i>
-                  <p className="mt-2 text-muted small">No patients registered yet</p>
-                </div>
-              ) : (
-                <div className="list-group list-group-flush">
-                  {recentPatients.map((patient) => (
-                    <div key={patient.PAT_ID || patient.id} className="list-group-item border-0 py-3">
-                      <div className="d-flex justify-content-between align-items-start">
-                        <div>
-                          <h6 className="mb-1">{patient.Patient_Name}</h6>
-                          <div className="small text-muted">
-                            <span className="me-3">
-                              <i className="bi bi-telephone me-1"></i>
-                              {patient.Phone_Number}
-                            </span>
-                            <span>
-                              <i className="bi bi-calendar me-1"></i>
-                              {calculateAge(patient.DOB)} yrs
-                            </span>
-                          </div>
-                        </div>
-                        <div className="text-end">
-                          <small className="text-muted d-block">
-                            ID: PAT-{patient.PAT_ID}
-                          </small>
-                          <button 
-                            className="btn btn-sm btn-outline-primary mt-1"
-                            onClick={() => navigate(`/reception/patients/view/${patient.PAT_ID || patient.id}`)}
-                          >
-                            <i className="bi bi-eye"></i>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="card-footer bg-transparent border-0">
-              <Link to="/reception/patients/list" className="btn btn-outline-secondary w-100">
-                <i className="bi bi-people me-1"></i> View All Patients
-              </Link>
-            </div>
-          </div>
-        </div>
       </div>
 
-      {/* System Status Footer */}
+      {/* Footer Stats */}
       <div className="row mt-4">
         <div className="col-12">
           <div className="card bg-light border-0">
@@ -753,7 +693,7 @@ const ReceptionDashboard = () => {
                   <div className="text-muted small">Next Auto-Refresh</div>
                   <div className="fw-bold">
                     <i className="bi bi-arrow-clockwise me-1"></i>
-                    60 seconds
+                    30 seconds
                   </div>
                 </div>
               </div>

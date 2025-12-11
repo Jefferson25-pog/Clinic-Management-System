@@ -1,4 +1,4 @@
-// src/routes/AppRoutes.jsx - FIXED DOCTOR ROUTES
+// src/routes/AppRoutes.jsx - UPDATED WITH CORRECT PHARMACY ROUTES
 import React, { Suspense } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import ProtectedRoute from "./ProtectedRoute";
@@ -17,7 +17,7 @@ import DepartmentList from "../modules/admin/pages/departments/DepartmentList";
 import LoginHistory from "../modules/admin/pages/LoginHistory";
 import SystemLogs from "../modules/admin/pages/SystemLogs";
 import CredentialsManagement from "../modules/admin/pages/CredentialsManagement";
-import Reports from "../modules/admin/pages/Reports";
+import AdminReports from "../modules/admin/pages/Reports"; // Renamed to avoid conflict
 import UserCreatePage from "../modules/admin/pages/UserCreatePage";
 import ResetPassword from "../modules/admin/pages/ResetPassword";
 
@@ -54,14 +54,25 @@ import BillsListPage from "../modules/reception/pages/billing/BillsListPage";
 import CreateBillPage from "../modules/reception/pages/billing/CreateBillPage";
 import BillDetailsPage from "../modules/reception/pages/billing/BillDetailsPage";
 
-// Staff Module Pages
+// ============= DOCTOR PAGES =============
 import DoctorDashboard from "../modules/doctor/pages/DoctorDashboard";
 import Appointments from "../modules/doctor/pages/Appointments";
 import LabRequests from "../modules/doctor/pages/LabRequests";
 import ConsultationForm from "../modules/doctor/pages/ConsultationForm";
 import ConsultationHistory from "../modules/doctor/pages/ConsultationHistory";
 import LabResults from "../modules/doctor/pages/LabResults";
+
+// ============= PHARMACIST PAGES =============
 import PharmacyDashboard from "../modules/pharmacy/pages/PharmacyDashboard";
+import PharmacyLayout from "../modules/pharmacy/PharmacyLayout";
+import Medicines from "../modules/pharmacy/pages/Medicines";
+import Suppliers from "../modules/pharmacy/pages/Suppliers";
+import Stock from "../modules/pharmacy/pages/Stock";
+import StockOrders from "../modules/pharmacy/pages/StockOrders";
+import Dispensing from "../modules/pharmacy/pages/Dispensing";
+import PharmacyReports from "../modules/pharmacy/pages/Reports"; // Renamed to avoid conflict
+
+// ============= LAB TECHNICIAN PAGES =============
 import LabTechDashboard from "../modules/labtechnician/pages/LabTechDashboard";
 
 const LoadingScreen = () => (
@@ -108,7 +119,7 @@ const AppRoutes = () => {
           <Route path="/admin/system-logs" element={<MainLayout><SystemLogs /></MainLayout>} />
           <Route path="/admin/login-history" element={<MainLayout><LoginHistory /></MainLayout>} />
           <Route path="/admin/credentials" element={<MainLayout><CredentialsManagement /></MainLayout>} />
-          <Route path="/admin/reports" element={<MainLayout><Reports /></MainLayout>} />
+          <Route path="/admin/reports" element={<MainLayout><AdminReports /></MainLayout>} />
           
           {/* User Management Routes */}
           <Route path="/admin/users/create" element={<MainLayout><UserCreatePage /></MainLayout>} />
@@ -148,23 +159,50 @@ const AppRoutes = () => {
           <Route path="/reception/billing/new" element={<Navigate to="/reception/billing/create" replace />} />
         </Route>
 
-      {/* ============= PROTECTED DOCTOR ROUTES ============= */}
-      <Route element={<ProtectedRoute allowedRoles={["Doctor"]} />}>
-        <Route path="/doctor" element={<MainLayout><DoctorDashboard /></MainLayout>} />
-        <Route path="/doctor/dashboard" element={<Navigate to="/doctor" replace />} />
-        <Route path="/doctor/appointments" element={<MainLayout><Appointments /></MainLayout>} />
-        <Route path="/doctor/consultation/:id?" element={<MainLayout><ConsultationForm /></MainLayout>} />
-        <Route path="/doctor/lab-requests" element={<MainLayout><LabRequests /></MainLayout>} />
-        <Route path="/doctor/lab-results" element={<MainLayout><LabResults /></MainLayout>} />
-        <Route path="/doctor/history" element={<MainLayout><ConsultationHistory /></MainLayout>} />
-        <Route path="/doctor/*" element={<Navigate to="/doctor" replace />} />
-      </Route>
+        {/* ============= PROTECTED DOCTOR ROUTES ============= */}
+        <Route element={<ProtectedRoute allowedRoles={["Doctor"]} />}>
+          <Route path="/doctor" element={<MainLayout><DoctorDashboard /></MainLayout>} />
+          <Route path="/doctor/dashboard" element={<Navigate to="/doctor" replace />} />
+          <Route path="/doctor/appointments" element={<MainLayout><Appointments /></MainLayout>} />
+          <Route path="/doctor/consultation/:id?" element={<MainLayout><ConsultationForm /></MainLayout>} />
+          <Route path="/doctor/lab-requests" element={<MainLayout><LabRequests /></MainLayout>} />
+          <Route path="/doctor/lab-results" element={<MainLayout><LabResults /></MainLayout>} />
+          <Route path="/doctor/history" element={<MainLayout><ConsultationHistory /></MainLayout>} />
+          <Route path="/doctor/*" element={<Navigate to="/doctor" replace />} />
+        </Route>
 
         {/* ============= PROTECTED PHARMACIST ROUTES ============= */}
         <Route element={<ProtectedRoute allowedRoles={["Pharmacist"]} />}>
+          {/* Main Pharmacy Dashboard - This is what shows when they login */}
           <Route path="/pharmacy" element={<MainLayout><PharmacyDashboard /></MainLayout>} />
           <Route path="/pharmacy/dashboard" element={<Navigate to="/pharmacy" replace />} />
-          <Route path="/pharmacy/*" element={<Navigate to="/pharmacy" replace />} />
+          
+          {/* Separate route for Pharmacy Layout with nested routes */}
+          {/* This route structure might be causing the confusion */}
+          <Route path="/pharmacy/*" element={<MainLayout><PharmacyLayout /></MainLayout>}>
+            {/* Default route inside PharmacyLayout - redirect to main dashboard */}
+            
+            {/* Medicines Management */}
+            <Route path="medicines" element={<Medicines />} />
+            
+            {/* Suppliers Management */}
+            <Route path="suppliers" element={<Suppliers />} />
+            
+            {/* Stock Management */}
+            <Route path="stock" element={<Stock />} />
+            
+            {/* Stock Orders */}
+            <Route path="stock-orders" element={<StockOrders />} />
+            
+            {/* Dispensing */}
+            <Route path="dispensing" element={<Dispensing />} />
+            
+            {/* Reports */}
+            <Route path="reports" element={<PharmacyReports />} />
+            
+            {/* Catch all - redirect to main pharmacy dashboard */}
+            <Route path="*" element={<Navigate to="/pharmacy" replace />} />
+          </Route>
         </Route>
 
         {/* ============= PROTECTED LAB TECHNICIAN ROUTES ============= */}

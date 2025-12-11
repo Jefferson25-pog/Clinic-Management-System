@@ -83,20 +83,25 @@ class PatientDetail(models.Model):
             raise ValidationError({'Email': 'Email must have a valid domain (e.g., @gmail.com, @yahoo.in)'})
     
     def save(self, *args, **kwargs):
-        # Auto-generate PAT_ID if not provided
+        # Auto-generate PAT_ID if not provided (for new patients only)
         if not self.PAT_ID:
-            last_patient = PatientDetail.objects.all().order_by('PAT_ID').last()
-            if last_patient and last_patient.PAT_ID.startswith('PAT-'):
-                try:
-                    last_num = int(last_patient.PAT_ID.split('-')[1])
-                    new_num = last_num + 1
-                except:
-                    new_num = 1
-            else:
-                new_num = 1
-            
-            self.PAT_ID = f"PAT-{new_num:06d}"
+            # Get the highest numeric part from existing PAT_IDs
+            patients = PatientDetail.objects.all()
+            max_num = 0
         
+            for patient in patients:
+                if patient.PAT_ID.startswith('PAT-'):
+                    try:
+                        # Extract number from PAT-000001 format
+                        num_part = patient.PAT_ID.split('-')[1]
+                        num = int(num_part)
+                        max_num = max(max_num, num)
+                    except (ValueError, IndexError):
+                        continue
+        
+            new_num = max_num + 1
+            self.PAT_ID = f"PAT-{new_num:06d}"
+
         super().save(*args, **kwargs)
     
     class Meta:
@@ -136,37 +141,48 @@ class AppointmentDetail(models.Model):
     
     def save(self, *args, **kwargs):
         is_new = not self.pk
-        
-        # Generate APPOINTMENT_ID if not provided
-        if not self.APPOINTMENT_ID:
+    
+        # Generate APPOINTMENT_ID if not provided (for new appointments only)
+        if is_new and not self.APPOINTMENT_ID:
             today = date.today()
-            appointments_today = AppointmentDetail.objects.filter(Date=today)
+            # Get appointments created today (based on created_at, not Date)
+            appointments_today = AppointmentDetail.objects.filter(created_at__date=today)
+        
             if appointments_today.exists():
                 try:
-                    max_num = max([int(a.APPOINTMENT_ID.split('-')[1]) for a in appointments_today if '-' in a.APPOINTMENT_ID])
+                    # Get max number from APPOINTMENT_ID
+                    max_num = 0
+                    for appointment in appointments_today:
+                        if appointment.APPOINTMENT_ID.startswith('APID-'):
+                            try:
+                                num = int(appointment.APPOINTMENT_ID.split('-')[1])
+                                max_num = max(max_num, num)
+                            except:
+                                pass
                     new_num = max_num + 1
                 except:
                     new_num = 1
             else:
                 new_num = 1
-            
+        
             self.APPOINTMENT_ID = f"APID-{new_num:04d}"
-        
-        # Generate TOKEN_NO if not provided
-        if not self.TOKEN_NO:
-            today = date.today()
-            appointments_today = AppointmentDetail.objects.filter(Date=today)
-            token_count = appointments_today.count()
+    
+        # Generate TOKEN_NO if not provided (for new appointments only)
+        if is_new and not self.TOKEN_NO:
+            today = self.Date  # Use appointment date, not today's date
+            # Count appointments for the same date (excluding current appointment)
+            existing_tokens = AppointmentDetail.objects.filter(Date=today).exclude(pk=self.pk)
+            token_count = existing_tokens.count()
             self.TOKEN_NO = f"TOK-{(token_count + 1):04d}"
-        
-        # Set completed_at or cancelled_at timestamps
+    
+    # Set completed_at or cancelled_at timestamps
         if self.Status == 'Completed' and not self.completed_at:
             self.completed_at = timezone.now()
         elif self.Status == 'Cancelled' and not self.cancelled_at:
             self.cancelled_at = timezone.now()
             if not self.cancelled_by:
                 self.cancelled_by = 'System'
-        
+    
         super().save(*args, **kwargs)
     
     def clean(self):
@@ -193,6 +209,8 @@ class AppointmentDetail(models.Model):
         db_table = 'APPOINTMENT_DETAILS'
         ordering = ['-Priority', 'Date', 'Time']
 
+# In receptionistapp/models.py - Update BillDetail model
+
 class BillDetail(models.Model):
     PAYMENT_STATUS = [
         ('Pending', 'Pending'),
@@ -211,7 +229,7 @@ class BillDetail(models.Model):
     ]
     
     BILL_ID = models.CharField(max_length=20, primary_key=True, verbose_name="Bill ID")
-    CONSULT_ID = models.ForeignKey('doctorapp.ConsultationDetail', on_delete=models.CASCADE)
+    CONSULT_ID = models.ForeignKey('doctorapp.ConsultationDetail', on_delete=models.CASCADE, related_name='bills')
     
     # Auto-calculated fields
     Consultation_Cost = models.DecimalField(max_digits=10, decimal_places=2, default=0)
@@ -228,50 +246,104 @@ class BillDetail(models.Model):
     Notes = models.TextField(blank=True, null=True)
     Created_Date = models.DateTimeField(auto_now_add=True)
     Updated_Date = models.DateTimeField(auto_now=True)
+    auto_generated = models.BooleanField(default=False, verbose_name="Auto-generated")
     
     def save(self, *args, **kwargs):
-        # Generate BILL_ID if not provided
-        if not self.BILL_ID:
-            last_bill = BillDetail.objects.all().order_by('BILL_ID').last()
-            if last_bill and last_bill.BILL_ID.startswith('BILL-'):
-                try:
-                    last_num = int(last_bill.BILL_ID.split('-')[1])
-                    new_num = last_num + 1
-                except:
-                    new_num = 1
-            else:
-                new_num = 1
-            
-            self.BILL_ID = f"BILL-{new_num:06d}"
+        is_new = not self.pk
+    
+        # Generate BILL_ID if not provided (for new bills only)
+        if is_new and not self.BILL_ID:
+            # Get the highest numeric part from existing BILL_IDs
+            bills = BillDetail.objects.all()
+            max_num = 0
         
+            for bill in bills:
+                if bill.BILL_ID.startswith('BILL-'):
+                    try:
+                        num_part = bill.BILL_ID.split('-')[1]
+                        num = int(num_part)
+                        max_num = max(max_num, num)
+                    except (ValueError, IndexError):
+                        continue
+        
+            new_num = max_num + 1
+            self.BILL_ID = f"BILL-{new_num:06d}"
+    
         # Always auto-calculate costs before saving
         self.calculate_costs()
-        
+    
         # Set Payment_Date if marked as Paid
         if self.Pay_Status == 'Paid' and not self.Payment_Date:
             self.Payment_Date = timezone.now()
-        
+    
         super().save(*args, **kwargs)
     
     def calculate_costs(self):
-        from pharmacistapp.models import DispensingMedicine
+        # Import here to avoid circular imports
+        from pharmacistapp.models import DispensingMedicine, Prescription
         from doctorapp.models import LabTestRequestDetail
         
         # Auto-calculate consultation cost from doctor's fees
         if hasattr(self.CONSULT_ID.DOC_ID, 'Consultation_fees'):
             self.Consultation_Cost = self.CONSULT_ID.DOC_ID.Consultation_fees or 0
+        else:
+            # Default consultation fee if not set
+            self.Consultation_Cost = 500.00
         
-        # Auto-calculate medicine costs
-        medicine_dispenses = DispensingMedicine.objects.filter(CONSULT_ID=self.CONSULT_ID)
-        self.Medicine_Cost = sum((dispense.Qty * dispense.Price) for dispense in medicine_dispenses)
+        # Calculate medicine costs from prescriptions
+        medicine_total = 0
+        
+        # Option 1: Get from DispensingMedicine (if pharmacy has dispensed)
+        try:
+            medicine_dispenses = DispensingMedicine.objects.filter(CONSULT_ID=self.CONSULT_ID)
+            if medicine_dispenses.exists():
+                medicine_total = sum((dispense.Qty * dispense.Price) for dispense in medicine_dispenses)
+        except:
+            pass
+        
+        # Option 2: Get from Prescription (doctor's prescription - estimated cost)
+        if medicine_total == 0:
+            try:
+                prescriptions = Prescription.objects.filter(CONSULT_ID=self.CONSULT_ID)
+                if prescriptions.exists():
+                    # Estimate cost based on medicine price
+                    for prescription in prescriptions:
+                        medicine_total += float(prescription.MED_ID.Price_per_Unit or 0) * self._estimate_duration(prescription.Duration)
+            except:
+                pass
+        
+        self.Medicine_Cost = medicine_total
         
         # Auto-calculate lab test costs
-        lab_requests = LabTestRequestDetail.objects.filter(CONSULT_ID=self.CONSULT_ID)
-        self.LabTest_Cost = sum((request.LAB_TEST_ID.Lab_Test_Cost or 0) for request in lab_requests)
+        try:
+            lab_requests = LabTestRequestDetail.objects.filter(CONSULT_ID=self.CONSULT_ID, Status='Completed')
+            self.LabTest_Cost = sum((request.LAB_TEST_ID.Lab_Test_Cost or 0) for request in lab_requests)
+        except:
+            self.LabTest_Cost = 0
         
         # Calculate total
         subtotal = self.Consultation_Cost + self.Medicine_Cost + self.LabTest_Cost + self.Additional_Charges
         self.Total_Amount = max(0, subtotal - self.Discount)
+    
+    def _estimate_duration(self, duration_str):
+        """Estimate number of days from duration string"""
+        try:
+            duration_str = str(duration_str).lower()
+            if 'day' in duration_str:
+                # Extract numbers from string like "7 days"
+                import re
+                numbers = re.findall(r'\d+', duration_str)
+                return int(numbers[0]) if numbers else 7
+            elif 'week' in duration_str:
+                numbers = re.findall(r'\d+', duration_str)
+                return (int(numbers[0]) if numbers else 1) * 7
+            elif 'month' in duration_str:
+                numbers = re.findall(r'\d+', duration_str)
+                return (int(numbers[0]) if numbers else 1) * 30
+            else:
+                return 7  # Default 7 days
+        except:
+            return 7
     
     def __str__(self):
         return f"{self.BILL_ID} - {self.CONSULT_ID.TOKEN_NO.PAT_ID.Patient_Name} - ₹{self.Total_Amount}"
@@ -279,3 +351,172 @@ class BillDetail(models.Model):
     class Meta:
         db_table = 'BILL_DETAILS'
         ordering = ['-Created_Date']
+
+# Add this to receptionistapp/models.py after PatientDetail model
+class PatientMedicalInfo(models.Model):
+    """
+    Model for storing patient medical information that only doctors can edit
+    """
+    patient = models.OneToOneField(
+        PatientDetail, 
+        on_delete=models.CASCADE, 
+        related_name='medical_info',
+        primary_key=True,
+        verbose_name="Patient"
+    )
+    
+    # Medical History
+    past_medical_history = models.TextField(
+        blank=True, 
+        null=True,
+        verbose_name="Past Medical History",
+        help_text="Previous illnesses, surgeries, hospitalizations"
+    )
+    
+    # Allergies
+    allergies = models.TextField(
+        blank=True, 
+        null=True,
+        verbose_name="Allergies",
+        help_text="Drug allergies, food allergies, environmental allergies"
+    )
+    
+    # Chronic Conditions
+    chronic_conditions = models.TextField(
+        blank=True, 
+        null=True,
+        verbose_name="Chronic Conditions",
+        help_text="Diabetes, Hypertension, Asthma, etc."
+    )
+    
+    # Current Medications
+    current_medications = models.TextField(
+        blank=True, 
+        null=True,
+        verbose_name="Current Medications",
+        help_text="Regular medications being taken"
+    )
+    
+    # Family History
+    family_history = models.TextField(
+        blank=True, 
+        null=True,
+        verbose_name="Family History",
+        help_text="Family medical history"
+    )
+    
+    # Social History
+    social_history = models.TextField(
+        blank=True, 
+        null=True,
+        verbose_name="Social History",
+        help_text="Smoking, alcohol, occupation, lifestyle"
+    )
+    
+    # Surgical History
+    surgical_history = models.TextField(
+        blank=True, 
+        null=True,
+        verbose_name="Surgical History",
+        help_text="Previous surgeries with dates"
+    )
+    
+    # Vital Signs (can be updated per visit)
+    height = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        blank=True, 
+        null=True,
+        verbose_name="Height (cm)"
+    )
+    weight = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        blank=True, 
+        null=True,
+        verbose_name="Weight (kg)"
+    )
+    blood_pressure = models.CharField(
+        max_length=20, 
+        blank=True, 
+        null=True,
+        verbose_name="Blood Pressure"
+    )
+    pulse = models.IntegerField(
+        blank=True, 
+        null=True,
+        verbose_name="Pulse (BPM)",
+        validators=[MinValueValidator(30), MaxValueValidator(200)]
+    )
+    temperature = models.DecimalField(
+        max_digits=4, 
+        decimal_places=1, 
+        blank=True, 
+        null=True,
+        verbose_name="Temperature (°C)",
+        validators=[MinValueValidator(35.0), MaxValueValidator(42.0)]
+    )
+    respiratory_rate = models.IntegerField(
+        blank=True, 
+        null=True,
+        verbose_name="Respiratory Rate",
+        validators=[MinValueValidator(8), MaxValueValidator(60)]
+    )
+    oxygen_saturation = models.DecimalField(
+        max_digits=4, 
+        decimal_places=1, 
+        blank=True, 
+        null=True,
+        verbose_name="O2 Saturation (%)",
+        validators=[MinValueValidator(70), MaxValueValidator(100)]
+    )
+    
+    # Additional Notes
+    additional_notes = models.TextField(
+        blank=True, 
+        null=True,
+        verbose_name="Additional Notes"
+    )
+    
+    # Audit fields
+    last_updated_by = models.ForeignKey(
+        'adminapp.StaffDetail',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Last Updated By",
+        limit_choices_to={'Role': 'Doctor'}  # Only doctors can update
+    )
+    last_updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return f"Medical Info - {self.patient.Patient_Name}"
+    
+    def calculate_bmi(self):
+        """Calculate BMI if height and weight are available"""
+        if self.height and self.weight:
+            height_m = float(self.height) / 100  # Convert cm to meters
+            bmi = float(self.weight) / (height_m * height_m)
+            return round(bmi, 1)
+        return None
+    
+    def get_bmi_category(self):
+        """Get BMI category"""
+        bmi = self.calculate_bmi()
+        if not bmi:
+            return None
+        
+        if bmi < 18.5:
+            return "Underweight"
+        elif 18.5 <= bmi < 25:
+            return "Normal"
+        elif 25 <= bmi < 30:
+            return "Overweight"
+        else:
+            return "Obese"
+    
+    class Meta:
+        db_table = 'PATIENT_MEDICAL_INFO'
+        verbose_name = 'Patient Medical Information'
+        verbose_name_plural = 'Patients Medical Information'

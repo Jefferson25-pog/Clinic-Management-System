@@ -104,38 +104,57 @@ export const AuthProvider = ({ children }) => {
 
   // Check authentication status - FIXED: Add /api/ prefix
   const checkAuth = useCallback(async () => {
-    if (!isBrowser) {
-      setLoading(false);
-      setInitialized(true);
-      return;
-    }
+  if (!isBrowser) {
+    setLoading(false);
+    setInitialized(true);
+    return;
+  }
 
-    const token = getFromStorage('access');
-    if (!token) {
-      setLoading(false);
-      setInitialized(true);
-      return;
-    }
+  const token = getFromStorage('access');
+  if (!token) {
+    console.log('No token found in storage');
+    setLoading(false);
+    setInitialized(true);
+    return;
+  }
 
-    try {
-      const response = await axiosInstance.get('/api/auth/check-auth/'); // ADDED /api/
-      
-      if (response.data.authenticated) {
-        setUser(response.data.user);
-        setStaffDetail(response.data.staff_detail || null);
-      } else {
-        setUser(null);
-        setStaffDetail(null);
+  // Simple token validation
+  if (token.split('.').length !== 3) {
+    console.warn('Token format is invalid');
+    clearStorage();
+    setLoading(false);
+    setInitialized(true);
+    return;
+  }
+
+  try {
+    const response = await axiosInstance.get('/api/auth/check-auth/', {
+      validateStatus: function (status) {
+        return status < 500; // Resolve only if status code is less than 500
       }
-    } catch (error) {
-      console.warn('Auth check failed:', error.message);
+    });
+    
+    if (response.data.authenticated) {
+      setUser(response.data.user);
+      setStaffDetail(response.data.staff_detail || null);
+    } else {
+      console.log('Not authenticated according to backend');
+      clearStorage();
       setUser(null);
       setStaffDetail(null);
-    } finally {
-      setLoading(false);
-      setInitialized(true);
     }
-  }, [getFromStorage]);
+  } catch (error) {
+    console.error('Auth check failed:', error.message);
+    if (error.response?.status === 401) {
+      clearStorage();
+    }
+    setUser(null);
+    setStaffDetail(null);
+  } finally {
+    setLoading(false);
+    setInitialized(true);
+  }
+}, [getFromStorage, clearStorage]);
 
   // Initialize auth
   useEffect(() => {
@@ -222,11 +241,6 @@ const loginStaff = useCallback(async (expectedRoleSlug, username, password) => {
         // Validate role for specific portal
         if (expectedBackendRole && staff.role !== expectedBackendRole) {
             throw new Error(`You are registered as ${staff.role}, not ${expectedBackendRole}. Please login from the correct portal.`);
-        }
-
-        // Validate staff account status
-        if (staff.Status && !['Available', 'Busy'].includes(staff.Status)) {
-            throw new Error('Your staff account is not active. Please contact administrator.');
         }
 
         // Validate account_active field

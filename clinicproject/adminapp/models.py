@@ -288,7 +288,6 @@ class StaffDetail(models.Model):
     
     STATUS_CHOICES = [
         ('Available', 'Available'),
-        ('Busy', 'Busy'),
         ('UnAvailable', 'UnAvailable'),
     ]
     
@@ -467,13 +466,6 @@ class StaffDetail(models.Model):
                 'Pharmacist': 'PHRM',
                 'Lab Technician': 'LBTCH',
                 'Admin': 'ADM',
-                'Nurse': 'NRS',
-                'Physiotherapist': 'PHY',
-                'Radiologist': 'RAD',
-                'Accountant': 'ACC',
-                'Ward Boy': 'WRD',
-                'Cleaner': 'CLN',
-                'Security Guard': 'SEC'
             }
             prefix = role_prefixes.get(self.Role, 'STAFF')
             

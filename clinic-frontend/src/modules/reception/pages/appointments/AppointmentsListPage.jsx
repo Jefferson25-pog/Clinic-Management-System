@@ -5,76 +5,114 @@ import { receptionApi } from '../../services/receptionApi';
 const AppointmentsListPage = () => {
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('all'); // all, today, scheduled, completed, cancelled
-  const [searchTerm, setSearchTerm] = useState('');
+  const [filters, setFilters] = useState({
+    search: "",
+    status: "",
+    priority: "",
+    date: "",
+    filter_type: "all"
+  });
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [stats, setStats] = useState({
     total: 0,
+    today: 0,
     scheduled: 0,
     completed: 0,
-    cancelled: 0,
-    today: 0
+    cancelled: 0
   });
   const navigate = useNavigate();
   const location = useLocation();
   
   const itemsPerPage = 10;
 
-  // Check URL for filters
+  // Initialize filters from URL
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const urlFilter = params.get('filter');
     const searchQuery = params.get('search');
+    const statusFilter = params.get('status');
     
-    if (urlFilter) {
-      setFilter(urlFilter);
-    }
+    const newFilters = { ...filters };
     
-    if (searchQuery) {
-      setSearchTerm(searchQuery);
-    }
+    if (urlFilter) newFilters.filter_type = urlFilter;
+    if (searchQuery) newFilters.search = searchQuery;
+    if (statusFilter) newFilters.status = statusFilter;
     
+    setFilters(newFilters);
+    setCurrentPage(1); // Reset to page 1 when filters change
     fetchAppointments();
     fetchAppointmentStats();
-  }, [location.search, currentPage]);
+  }, [location.search]);
+
+  // Fetch appointments when currentPage changes
+  useEffect(() => {
+    if (currentPage > 1) {
+      fetchAppointments();
+    }
+  }, [currentPage]);
 
   const fetchAppointments = async () => {
     try {
       setLoading(true);
       
-      let params = {
-        page: currentPage,
-        page_size: itemsPerPage
-      };
+      // Build query parameters according to backend API
+      const params = {};
       
-      // Apply filters
-      if (filter !== 'all') {
-        if (filter === 'today') {
-          params.date = new Date().toISOString().split('T')[0];
-        } else {
-          params.status = filter.charAt(0).toUpperCase() + filter.slice(1);
-        }
+      // Apply search filter (matches backend search_fields)
+      if (filters.search) {
+        params.search = filters.search;
       }
       
-      // Apply search
-      if (searchTerm) {
-        params.search = searchTerm;
+      // Apply status filter (exact match)
+      if (filters.status) {
+        params.status = filters.status;
+      } else if (filters.filter_type !== 'all' && filters.filter_type !== 'today') {
+        // If using filter_type for status
+        params.status = filters.filter_type.charAt(0).toUpperCase() + filters.filter_type.slice(1);
       }
       
+      // Apply priority filter
+      if (filters.priority) {
+        params.priority = filters.priority;
+      }
+      
+      // Apply date filter
+      if (filters.date) {
+        params.date = filters.date;
+      } else if (filters.filter_type === 'today') {
+        const today = new Date().toISOString().split('T')[0];
+        params.date = today;
+      }
+      
+      console.log("Fetching appointments with params:", params); // Debug log
+      
+      // Call the API
       const response = await receptionApi.getAppointments(params);
       
       if (response.data) {
-        const appointmentsList = Array.isArray(response.data) 
-          ? response.data 
-          : response.data.results || [];
+        let appointmentsList = [];
+        let totalCount = 0;
         
-        setAppointments(appointmentsList);
-        
-        // Update pagination
-        if (response.data.count) {
-          setTotalPages(Math.ceil(response.data.count / itemsPerPage));
+        // Handle different response formats
+        if (Array.isArray(response.data)) {
+          appointmentsList = response.data;
+          totalCount = response.data.length;
+        } else if (response.data.results) {
+          appointmentsList = response.data.results;
+          totalCount = response.data.count || response.data.results.length;
+        } else if (response.data.data) {
+          appointmentsList = response.data.data;
+          totalCount = response.data.total || response.data.data.length;
         }
+        
+        // Apply client-side pagination if needed
+        const startIndex = (currentPage - 1) * itemsPerPage;
+        const endIndex = startIndex + itemsPerPage;
+        const paginatedAppointments = appointmentsList.slice(startIndex, endIndex);
+        
+        setAppointments(paginatedAppointments);
+        setTotalPages(Math.ceil(totalCount / itemsPerPage));
       }
       
     } catch (error) {
@@ -89,51 +127,90 @@ const AppointmentsListPage = () => {
     try {
       const today = new Date().toISOString().split('T')[0];
       
-      // Get all appointments for stats
-      const allResponse = await receptionApi.getAppointments({ page_size: 1 });
-      const todayResponse = await receptionApi.getAppointments({ 
-        date: today,
-        page_size: 1
-      });
-      const scheduledResponse = await receptionApi.getAppointments({ 
-        status: 'Scheduled',
-        page_size: 1
-      });
-      const completedResponse = await receptionApi.getAppointments({ 
-        status: 'Completed',
-        page_size: 1
-      });
-      const cancelledResponse = await receptionApi.getAppointments({ 
-        status: 'Cancelled',
-        page_size: 1
-      });
+      // Try to fetch stats from the API
+      try {
+        // Use the stats endpoint if available
+        const response = await receptionApi.getAppointments({});
+        if (response.data) {
+          const allAppointments = Array.isArray(response.data) 
+            ? response.data 
+            : response.data.results || [];
+          
+          setStats({
+            total: allAppointments.length,
+            today: allAppointments.filter(a => a.Date === today).length,
+            scheduled: allAppointments.filter(a => a.Status === 'Scheduled').length,
+            completed: allAppointments.filter(a => a.Status === 'Completed').length,
+            cancelled: allAppointments.filter(a => a.Status === 'Cancelled').length
+          });
+          return;
+        }
+      } catch (error) {
+        console.log('Could not fetch all appointments for stats:', error);
+      }
+      
+      // Fallback: Use current filtered appointments for stats
+      const allResponse = await receptionApi.getAppointments({});
+      const allData = allResponse.data ? 
+        (Array.isArray(allResponse.data) ? allResponse.data : allResponse.data.results || []) : [];
       
       setStats({
-        total: allResponse.data?.count || 0,
-        today: todayResponse.data?.count || 0,
-        scheduled: scheduledResponse.data?.count || 0,
-        completed: completedResponse.data?.count || 0,
-        cancelled: cancelledResponse.data?.count || 0
+        total: allData.length,
+        today: allData.filter(a => a.Date === today).length,
+        scheduled: allData.filter(a => a.Status === 'Scheduled').length,
+        completed: allData.filter(a => a.Status === 'Completed').length,
+        cancelled: allData.filter(a => a.Status === 'Cancelled').length
       });
       
     } catch (error) {
       console.error('Error fetching appointment stats:', error);
+      // Use current appointments for stats as last resort
+      setStats({
+        total: appointments.length,
+        today: appointments.filter(a => a.Date === new Date().toISOString().split('T')[0]).length,
+        scheduled: appointments.filter(a => a.Status === 'Scheduled').length,
+        completed: appointments.filter(a => a.Status === 'Completed').length,
+        cancelled: appointments.filter(a => a.Status === 'Cancelled').length
+      });
     }
+  };
+
+  const handleFilterChange = (e) => {
+    const { name, value } = e.target;
+    setFilters(prev => ({ ...prev, [name]: value }));
   };
 
   const handleSearch = (e) => {
     e.preventDefault();
-    if (searchTerm.trim()) {
-      navigate(`/reception/appointments/list?search=${encodeURIComponent(searchTerm)}&filter=${filter}`);
-    } else {
-      navigate(`/reception/appointments/list?filter=${filter}`);
-    }
+    setCurrentPage(1);
+    updateURL();
+    fetchAppointments();
   };
 
-  const handleFilterChange = (newFilter) => {
-    setFilter(newFilter);
+  const updateURL = () => {
+    const queryParams = new URLSearchParams();
+    
+    if (filters.search) queryParams.append('search', filters.search);
+    if (filters.filter_type !== 'all') queryParams.append('filter', filters.filter_type);
+    if (filters.status) queryParams.append('status', filters.status);
+    if (filters.priority) queryParams.append('priority', filters.priority);
+    if (filters.date) queryParams.append('date', filters.date);
+    
+    const queryString = queryParams.toString();
+    navigate(`/reception/appointments/list${queryString ? `?${queryString}` : ''}`, { replace: true });
+  };
+
+  const clearFilters = () => {
+    setFilters({
+      search: "",
+      status: "",
+      priority: "",
+      date: "",
+      filter_type: "all"
+    });
     setCurrentPage(1);
-    navigate(`/reception/appointments/list?filter=${newFilter}${searchTerm ? `&search=${encodeURIComponent(searchTerm)}` : ''}`);
+    navigate('/reception/appointments/list', { replace: true });
+    setTimeout(() => fetchAppointments(), 100);
   };
 
   const handleCancelAppointment = async (appointmentId, patientName) => {
@@ -153,33 +230,25 @@ const AppointmentsListPage = () => {
     }
   };
 
-  const handleCompleteAppointment = async (appointmentId) => {
-    if (window.confirm('Mark this appointment as completed?')) {
-      try {
-        await receptionApi.updateAppointment(appointmentId, { 
-          Status: 'Completed',
-          Completed_At: new Date().toISOString()
-        });
-        alert('Appointment marked as completed');
-        fetchAppointments();
-        fetchAppointmentStats();
-      } catch (error) {
-        alert('Failed to update appointment');
-      }
-    }
-  };
+  // REMOVED: handleCompleteAppointment function
+  // Receptionist should NOT be able to mark appointments as completed
 
   const handlePageChange = (page) => {
     setCurrentPage(page);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
-    return new Date(dateString).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
-    });
+    try {
+      return new Date(dateString).toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
+      });
+    } catch (error) {
+      return dateString;
+    }
   };
 
   const getStatusBadge = (status) => {
@@ -216,269 +285,386 @@ const AppointmentsListPage = () => {
     );
   };
 
+  // Add this function for date input
+  const handleDateFilterChange = (e) => {
+    const dateValue = e.target.value;
+    setFilters(prev => ({ ...prev, date: dateValue, filter_type: 'all' }));
+    setCurrentPage(1);
+  };
+
+  // Add this function for manual refresh
+  const handleRefresh = () => {
+    setCurrentPage(1);
+    fetchAppointments();
+    fetchAppointmentStats();
+  };
+
+  // Apply filter immediately when dropdown changes
+  const handleFilterChangeAndApply = (e) => {
+    handleFilterChange(e);
+    const { name, value } = e.target;
+    
+    // If it's a significant filter change, apply immediately
+    if (name === 'status' || name === 'priority' || name === 'filter_type') {
+      setCurrentPage(1);
+      setTimeout(() => {
+        updateURL();
+        fetchAppointments();
+      }, 100);
+    }
+  };
+
   return (
-    <div className="container-fluid">
-      
-      {/* Header */}
-      <div className="row mb-4">
-        <div className="col-lg-8">
-          <div>
-            <h1 className="h2 mb-1">All Appointments</h1>
-            <p className="text-muted mb-0">
-              Manage patient appointments, view schedules, and update status
-            </p>
-          </div>
+    <div className="appointments-management">
+      {/* Header - Matching StaffList style */}
+      <div className="d-flex justify-content-between align-items-center mb-4">
+        <div>
+          <h3 className="mb-1">Appointments Management</h3>
+          <p className="text-muted mb-0">Manage all patient appointments in the system</p>
         </div>
-        <div className="col-lg-4 text-lg-end">
+        <div className="d-flex gap-2">
           <Link to="/reception/appointments/create" className="btn btn-primary">
             <i className="bi bi-calendar-plus me-1"></i> New Appointment
           </Link>
-          <Link to="/reception/" className="btn btn-outline-secondary ms-2">
-            <i className="bi bi-arrow-left me-1"></i> Back to Appointment Hub
+          <Link to="/reception/" className="btn btn-outline-secondary">
+            <i className="bi bi-arrow-left me-1"></i> Back to Dashboard
           </Link>
         </div>
       </div>
 
-      {/* Quick Stats */}
-      <div className="row mb-4">
-        <div className="col-md-2 col-6 mb-3">
-          <div className="card border-primary border-start border-4">
-            <div className="card-body py-3">
-              <div className="text-center">
-                <h6 className="text-muted mb-1">Total</h6>
-                <h3 className="mb-0">{stats.total}</h3>
-              </div>
-            </div>
-          </div>
-        </div>
-        
-        <div className="col-md-2 col-6 mb-3">
-          <div className="card border-info border-start border-4">
-            <div className="card-body py-3">
-              <div className="text-center">
-                <h6 className="text-muted mb-1">Today</h6>
-                <h3 className="mb-0">{stats.today}</h3>
-              </div>
-            </div>
-          </div>
-        </div>
-        
-        <div className="col-md-2 col-6 mb-3">
-          <div className="card border-warning border-start border-4">
-            <div className="card-body py-3">
-              <div className="text-center">
-                <h6 className="text-muted mb-1">Scheduled</h6>
-                <h3 className="mb-0">{stats.scheduled}</h3>
-              </div>
-            </div>
-          </div>
-        </div>
-        
-        <div className="col-md-2 col-6 mb-3">
-          <div className="card border-success border-start border-4">
-            <div className="card-body py-3">
-              <div className="text-center">
-                <h6 className="text-muted mb-1">Completed</h6>
-                <h3 className="mb-0">{stats.completed}</h3>
-              </div>
-            </div>
-          </div>
-        </div>
-        
-        <div className="col-md-2 col-6 mb-3">
-          <div className="card border-danger border-start border-4">
-            <div className="card-body py-3">
-              <div className="text-center">
-                <h6 className="text-muted mb-1">Cancelled</h6>
-                <h3 className="mb-0">{stats.cancelled}</h3>
-              </div>
-            </div>
-          </div>
-        </div>
-        
-        <div className="col-md-2 col-6 mb-3">
-          <div className="card border-secondary border-start border-4">
-            <div className="card-body py-3">
-              <div className="text-center">
-                <h6 className="text-muted mb-1">Pages</h6>
-                <h3 className="mb-0">{totalPages}</h3>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Filters and Search */}
-      <div className="card shadow-sm mb-4">
+      {/* Filters - Matching StaffList style */}
+      <div className="card shadow-sm border-0 mb-4">
         <div className="card-body">
-          <div className="row align-items-center">
-            <div className="col-md-4">
-              <div className="btn-group w-100" role="group">
-                <button
-                  type="button"
-                  className={`btn ${filter === 'all' ? 'btn-primary' : 'btn-outline-primary'}`}
-                  onClick={() => handleFilterChange('all')}
-                >
-                  All
+          <h5 className="card-title mb-3"><i className="bi bi-funnel me-2"></i>Quick Filters</h5>
+          <form onSubmit={handleSearch}>
+            <div className="row g-2">
+              <div className="col-md-3">
+                <input 
+                  type="text" 
+                  className="form-control" 
+                  placeholder="Search patient, doctor, token..." 
+                  name="search" 
+                  value={filters.search} 
+                  onChange={handleFilterChange} 
+                />
+              </div>
+              <div className="col-md-2">
+                <select className="form-select" name="status" value={filters.status} onChange={handleFilterChangeAndApply}>
+                  <option value="">All Status</option>
+                  <option value="Scheduled">Scheduled</option>
+                  <option value="Completed">Completed</option>
+                  <option value="Cancelled">Cancelled</option>
+                </select>
+              </div>
+              <div className="col-md-2">
+                <select className="form-select" name="priority" value={filters.priority} onChange={handleFilterChangeAndApply}>
+                  <option value="">All Priorities</option>
+                  <option value="normal">Normal</option>
+                  <option value="urgent">Urgent</option>
+                  <option value="critical">Critical</option>
+                </select>
+              </div>
+              <div className="col-md-2">
+                <select className="form-select" name="filter_type" value={filters.filter_type} onChange={handleFilterChangeAndApply}>
+                  <option value="all">All Appointments</option>
+                  <option value="today">Today Only</option>
+                  <option value="scheduled">Scheduled</option>
+                  <option value="completed">Completed</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+              </div>
+              <div className="col-md-3 d-flex gap-2">
+                <button type="submit" className="btn btn-primary">
+                  <i className="bi bi-search me-1"></i> Search
                 </button>
-                <button
-                  type="button"
-                  className={`btn ${filter === 'today' ? 'btn-primary' : 'btn-outline-primary'}`}
-                  onClick={() => handleFilterChange('today')}
-                >
-                  Today
-                </button>
-                <button
-                  type="button"
-                  className={`btn ${filter === 'scheduled' ? 'btn-primary' : 'btn-outline-primary'}`}
-                  onClick={() => handleFilterChange('scheduled')}
-                >
-                  Scheduled
+                <button type="button" className="btn btn-outline-secondary" onClick={clearFilters}>
+                  <i className="bi bi-x-circle me-1"></i> Clear
                 </button>
               </div>
             </div>
             
-            <div className="col-md-4 mt-2 mt-md-0">
-              <div className="btn-group w-100" role="group">
-                <button
-                  type="button"
-                  className={`btn ${filter === 'completed' ? 'btn-primary' : 'btn-outline-primary'}`}
-                  onClick={() => handleFilterChange('completed')}
-                >
-                  Completed
-                </button>
-                <button
-                  type="button"
-                  className={`btn ${filter === 'cancelled' ? 'btn-primary' : 'btn-outline-primary'}`}
-                  onClick={() => handleFilterChange('cancelled')}
-                >
-                  Cancelled
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-outline-secondary"
-                  onClick={() => {
-                    setSearchTerm('');
-                    setFilter('all');
-                    navigate('/reception/appointments/list');
-                  }}
-                >
-                  Clear
-                </button>
-              </div>
-            </div>
-            
-            <div className="col-md-4 mt-2 mt-md-0">
-              <form onSubmit={handleSearch}>
+            {/* Date Filter Row */}
+            <div className="row mt-3">
+              <div className="col-md-3">
                 <div className="input-group">
-                  <input
-                    type="text"
-                    className="form-control"
-                    placeholder="Search by patient, doctor, or token..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
+                  <span className="input-group-text"><i className="bi bi-calendar"></i></span>
+                  <input 
+                    type="date" 
+                    className="form-control" 
+                    name="date" 
+                    value={filters.date} 
+                    onChange={handleDateFilterChange}
                   />
-                  <button className="btn btn-primary" type="submit">
-                    <i className="bi bi-search"></i>
+                </div>
+                <small className="text-muted">Filter by specific date</small>
+              </div>
+              <div className="col-md-9 d-flex align-items-end">
+                <div className="d-flex gap-2 flex-wrap">
+                  <button 
+                    type="button" 
+                    className="btn btn-sm btn-outline-primary"
+                    onClick={() => {
+                      setFilters(prev => ({ 
+                        ...prev, 
+                        date: new Date().toISOString().split('T')[0],
+                        filter_type: 'all'
+                      }));
+                      setCurrentPage(1);
+                      updateURL();
+                      fetchAppointments();
+                    }}
+                  >
+                    Today
+                  </button>
+                  <button 
+                    type="button" 
+                    className="btn btn-sm btn-outline-secondary"
+                    onClick={() => {
+                      const tomorrow = new Date();
+                      tomorrow.setDate(tomorrow.getDate() + 1);
+                      setFilters(prev => ({ 
+                        ...prev, 
+                        date: tomorrow.toISOString().split('T')[0],
+                        filter_type: 'all'
+                      }));
+                      setCurrentPage(1);
+                      updateURL();
+                      fetchAppointments();
+                    }}
+                  >
+                    Tomorrow
+                  </button>
+                  <button 
+                    type="button" 
+                    className="btn btn-sm btn-outline-info"
+                    onClick={() => {
+                      const yesterday = new Date();
+                      yesterday.setDate(yesterday.getDate() - 1);
+                      setFilters(prev => ({ 
+                        ...prev, 
+                        date: yesterday.toISOString().split('T')[0],
+                        filter_type: 'all'
+                      }));
+                      setCurrentPage(1);
+                      updateURL();
+                      fetchAppointments();
+                    }}
+                  >
+                    Yesterday
                   </button>
                 </div>
-              </form>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {/* Stats and Controls Row */}
+      <div className="row mb-4">
+        <div className="col-md-9">
+          <div className="row">
+            <div className="col-md-3">
+              <div className="card bg-light">
+                <div className="card-body text-center">
+                  <h6 className="text-muted">Total</h6>
+                  <h3>{stats.total}</h3>
+                </div>
+              </div>
+            </div>
+            <div className="col-md-3">
+              <div className="card bg-light">
+                <div className="card-body text-center">
+                  <h6 className="text-muted">Today's</h6>
+                  <h3 className="text-info">{stats.today}</h3>
+                </div>
+              </div>
+            </div>
+            <div className="col-md-3">
+              <div className="card bg-light">
+                <div className="card-body text-center">
+                  <h6 className="text-muted">Scheduled</h6>
+                  <h3 className="text-warning">{stats.scheduled}</h3>
+                </div>
+              </div>
+            </div>
+            <div className="col-md-3">
+              <div className="card bg-light">
+                <div className="card-body text-center">
+                  <h6 className="text-muted">Completed</h6>
+                  <h3 className="text-success">{stats.completed}</h3>
+                </div>
+              </div>
             </div>
           </div>
-          
-          <div className="mt-3">
-            <small className="text-muted">
-              <i className="bi bi-filter me-1"></i>
-              Filter: {filter === 'all' ? 'All Appointments' : filter.charAt(0).toUpperCase() + filter.slice(1)}
-              {searchTerm && ` | Searching: "${searchTerm}"`}
-            </small>
+        </div>
+        <div className="col-md-3">
+          <div className="card bg-light h-100">
+            <div className="card-body d-flex flex-column justify-content-center">
+              <button 
+                className="btn btn-primary w-100"
+                onClick={handleRefresh}
+                disabled={loading}
+              >
+                {loading ? (
+                  <>
+                    <span className="spinner-border spinner-border-sm me-2"></span>
+                    Loading...
+                  </>
+                ) : (
+                  <>
+                    <i className="bi bi-arrow-clockwise me-2"></i>
+                    Refresh Data
+                  </>
+                )}
+              </button>
+              <div className="mt-2 text-center">
+                <small className="text-muted">
+                  {filters.search ? `Search: "${filters.search}"` : 
+                   filters.status ? `Status: ${filters.status}` : 
+                   filters.date ? `Date: ${filters.date}` : 
+                   filters.filter_type !== 'all' ? `Filter: ${filters.filter_type}` : 'All appointments'}
+                </small>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Appointments Table */}
-      <div className="card shadow-sm">
-        <div className="card-header bg-white border-0">
-          <div className="d-flex justify-content-between align-items-center">
-            <h5 className="mb-0">
-              <i className="bi bi-calendar-week me-2"></i>
-              Appointments ({appointments.length})
-            </h5>
-            <div className="d-flex align-items-center">
-              <small className="text-muted me-3">Auto-refresh: 30s</small>
-              <button 
-                className="btn btn-outline-secondary btn-sm"
-                onClick={fetchAppointments}
-                disabled={loading}
-              >
-                <i className="bi bi-arrow-clockwise"></i>
-              </button>
-            </div>
+      {/* Quick Filter Buttons */}
+      <div className="row mb-4">
+        <div className="col-12">
+          <div className="btn-group flex-wrap" role="group">
+            <button
+              type="button"
+              className={`btn ${filters.filter_type === 'today' ? 'btn-primary' : 'btn-outline-primary'}`}
+              onClick={() => {
+                setFilters({ search: "", status: "", priority: "", date: "", filter_type: 'today' });
+                setCurrentPage(1);
+                updateURL();
+                fetchAppointments();
+              }}
+            >
+              <i className="bi bi-calendar-day me-1"></i> Today
+            </button>
+            <button
+              type="button"
+              className={`btn ${filters.status === 'Scheduled' || filters.filter_type === 'scheduled' ? 'btn-info' : 'btn-outline-info'}`}
+              onClick={() => {
+                setFilters({ search: "", status: 'Scheduled', priority: "", date: "", filter_type: 'scheduled' });
+                setCurrentPage(1);
+                updateURL();
+                fetchAppointments();
+              }}
+            >
+              <i className="bi bi-calendar-check me-1"></i> Scheduled
+            </button>
+            <button
+              type="button"
+              className={`btn ${filters.status === 'Completed' || filters.filter_type === 'completed' ? 'btn-success' : 'btn-outline-success'}`}
+              onClick={() => {
+                setFilters({ search: "", status: 'Completed', priority: "", date: "", filter_type: 'completed' });
+                setCurrentPage(1);
+                updateURL();
+                fetchAppointments();
+              }}
+            >
+              <i className="bi bi-check-circle me-1"></i> Completed
+            </button>
+            <button
+              type="button"
+              className={`btn ${filters.status === 'Cancelled' || filters.filter_type === 'cancelled' ? 'btn-danger' : 'btn-outline-danger'}`}
+              onClick={() => {
+                setFilters({ search: "", status: 'Cancelled', priority: "", date: "", filter_type: 'cancelled' });
+                setCurrentPage(1);
+                updateURL();
+                fetchAppointments();
+              }}
+            >
+              <i className="bi bi-x-circle me-1"></i> Cancelled
+            </button>
+            <button
+              type="button"
+              className={`btn ${filters.priority === 'urgent' ? 'btn-warning' : 'btn-outline-warning'}`}
+              onClick={() => {
+                setFilters({ search: "", status: "", priority: 'urgent', date: "", filter_type: 'all' });
+                setCurrentPage(1);
+                updateURL();
+                fetchAppointments();
+              }}
+            >
+              <i className="bi bi-exclamation-triangle me-1"></i> Urgent
+            </button>
           </div>
         </div>
-        
+      </div>
+
+      {/* Appointments Table - Matching StaffList style */}
+      <div className="card shadow-sm border-0">
         <div className="card-body p-0">
+          {/* Loading State */}
           {loading ? (
             <div className="text-center py-5">
-              <div className="spinner-border text-primary" role="status">
-                <span className="visually-hidden">Loading...</span>
-              </div>
-              <p className="mt-3 text-muted">Loading appointments...</p>
+              <div className="spinner-border text-primary"></div>
+              <p className="mt-3">Loading appointments...</p>
             </div>
           ) : appointments.length === 0 ? (
             <div className="text-center py-5">
-              <i className="bi bi-calendar-x display-6 text-muted"></i>
-              <h5 className="mt-3">No appointments found</h5>
+              <i className="bi bi-calendar-x display-1 text-muted"></i>
+              <h5 className="mt-3">No Appointments Found</h5>
               <p className="text-muted">
-                {searchTerm 
-                  ? `No appointments match your search "${searchTerm}"` 
-                  : filter !== 'all' 
-                    ? `No ${filter} appointments found`
+                {filters.search 
+                  ? `No appointments match your search "${filters.search}"` 
+                  : filters.filter_type !== 'all'
+                    ? `No ${filters.filter_type} appointments found`
+                    : filters.date
+                    ? `No appointments found for ${filters.date}`
                     : 'No appointments scheduled yet'
                 }
               </p>
-              <Link to="/reception/appointments/create" className="btn btn-primary mt-2">
+              <Link to="/reception/appointments/create" className="btn btn-primary">
                 <i className="bi bi-calendar-plus me-1"></i> Create First Appointment
               </Link>
             </div>
           ) : (
             <div className="table-responsive">
-              <table className="table table-hover mb-0">
+              <table className="table table-hover align-middle mb-0">
                 <thead className="table-light">
                   <tr>
-                    <th>Token No</th>
+                    <th>ID</th>
                     <th>Patient</th>
                     <th>Doctor</th>
                     <th>Date & Time</th>
                     <th>Priority</th>
                     <th>Status</th>
-                    <th>Actions</th>
+                    <th className="text-end">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {appointments.map((appointment) => (
                     <tr key={appointment.TOKEN_NO || appointment.id}>
-                      <td className="align-middle">
-                        <strong className="text-primary">
-                          APID-{(appointment.TOKEN_NO || appointment.id).toString().padStart(4, '0')}
-                        </strong>
-                        <div className="text-muted small">
-                          TOK-{(appointment.TOKEN_NO || appointment.id).toString().padStart(4, '0')}
+                      <td>
+                        <div>
+                          <span className="badge bg-secondary">
+                            #{appointment.APPOINTMENT_ID || appointment.id}
+                          </span>
                         </div>
-                      </td>
-                      <td className="align-middle">
-                        <div className="fw-medium">{appointment.patient_name || 'N/A'}</div>
                         <small className="text-muted">
-                          ID: PAT-{appointment.PAT_ID || 'N/A'}
+                          Token: {appointment.TOKEN_NO || `TOK-${appointment.id}`}
                         </small>
                       </td>
-                      <td className="align-middle">
+                      <td>
+                        <div className="fw-medium">{appointment.patient_name || 'N/A'}</div>
+                        <small className="text-muted">
+                          ID: {appointment.PAT_ID || 'N/A'}
+                        </small>
+                      </td>
+                      <td>
                         <div className="fw-medium">Dr. {appointment.doctor_name || 'N/A'}</div>
                         <small className="text-muted">
                           Dept: {appointment.doctor_department || 'General'}
                         </small>
                       </td>
-                      <td className="align-middle">
+                      <td>
                         <div>{formatDate(appointment.Date)}</div>
                         <small className="text-muted">
                           {appointment.Time || appointment.Created_Date 
@@ -490,52 +676,43 @@ const AppointmentsListPage = () => {
                           }
                         </small>
                       </td>
-                      <td className="align-middle">
+                      <td>
                         {getPriorityBadge(appointment.Priority)}
                       </td>
-                      <td className="align-middle">
+                      <td>
                         {getStatusBadge(appointment.Status)}
                       </td>
-                      <td className="align-middle">
+                      <td className="text-end">
                         <div className="btn-group btn-group-sm">
-                          <button 
-                            className="btn btn-outline-primary"
-                            onClick={() => navigate(`/reception/appointments/view/${appointment.TOKEN_NO || appointment.id}`)}
+                          <Link 
+                            to={`/reception/appointments/view/${appointment.TOKEN_NO || appointment.id}`}
+                            className="btn btn-outline-info"
                             title="View Details"
                           >
                             <i className="bi bi-eye"></i>
-                          </button>
+                          </Link>
                           
                           {appointment.Status === 'Scheduled' && (
-                            <>
-                              <button 
-                                className="btn btn-outline-success"
-                                onClick={() => handleCompleteAppointment(appointment.TOKEN_NO || appointment.id)}
-                                title="Mark as Completed"
-                              >
-                                <i className="bi bi-check"></i>
-                              </button>
-                              <button 
-                                className="btn btn-outline-danger"
-                                onClick={() => handleCancelAppointment(
-                                  appointment.TOKEN_NO || appointment.id, 
-                                  appointment.patient_name
-                                )}
-                                title="Cancel Appointment"
-                              >
-                                <i className="bi bi-x"></i>
-                              </button>
-                            </>
+                            <button
+                              className="btn btn-outline-danger"
+                              onClick={() => handleCancelAppointment(
+                                appointment.TOKEN_NO || appointment.id,
+                                appointment.patient_name
+                              )}
+                              title="Cancel Appointment"
+                            >
+                              <i className="bi bi-x"></i>
+                            </button>
                           )}
                           
                           {appointment.Status === 'Completed' && (
-                            <button 
-                              className="btn btn-outline-info"
-                              onClick={() => navigate(`/reception/billing/create?appointment=${appointment.TOKEN_NO}`)}
+                            <Link
+                              to={`/reception/billing/create?appointment=${appointment.TOKEN_NO}`}
+                              className="btn btn-outline-warning"
                               title="Create Bill"
                             >
                               <i className="bi bi-cash"></i>
-                            </button>
+                            </Link>
                           )}
                         </div>
                       </td>
@@ -611,9 +788,17 @@ const AppointmentsListPage = () => {
                   </Link>
                 </div>
                 <div className="col-md-3 text-center border-end">
-                  <Link to="/reception/appointments/list?filter=today" className="btn btn-outline-info w-100">
+                  <button 
+                    onClick={() => {
+                      setFilters({ search: "", status: "", priority: "", date: "", filter_type: 'today' });
+                      setCurrentPage(1);
+                      updateURL();
+                      fetchAppointments();
+                    }}
+                    className="btn btn-outline-info w-100"
+                  >
                     <i className="bi bi-calendar-day me-1"></i> Today's Appointments
-                  </Link>
+                  </button>
                 </div>
                 <div className="col-md-3 text-center border-end">
                   <button 
@@ -624,8 +809,8 @@ const AppointmentsListPage = () => {
                   </button>
                 </div>
                 <div className="col-md-3 text-center">
-                  <Link to="/reception/appointments" className="btn btn-outline-secondary w-100">
-                    <i className="bi bi-house-door me-1"></i> Appointment Hub
+                  <Link to="/reception/" className="btn btn-outline-secondary w-100">
+                    <i className="bi bi-house-door me-1"></i> Back to Dashboard
                   </Link>
                 </div>
               </div>

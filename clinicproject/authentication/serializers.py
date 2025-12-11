@@ -174,11 +174,6 @@ class StaffLoginSerializer(serializers.Serializer):
         if not staff.account_active:
             raise serializers.ValidationError('Staff account is deactivated. Please contact administrator.')
         
-        # Check staff status - handle None case
-        status = getattr(staff, 'Status', None)
-        if status and status not in ['Available', 'Busy']:
-            raise serializers.ValidationError(f'Staff is {status} and not available for login.')
-        
         # IMPORTANT: Generate tokens
         try:
             refresh = RefreshToken.for_user(user)

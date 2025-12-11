@@ -1,8 +1,7 @@
-// src/modules/doctor/services/doctorApi.js - SIMPLIFIED VERSION
+// doctorApi.js - UPDATED VERSION
 import axiosInstance from "../../../api/axiosInstance.js";
 
 const doctorApi = {
-  // REMOVE ALL AVAILABILITY ENDPOINTS FOR NOW
   // ============= Appointments =============
   getMyAppointments: () => 
     axiosInstance.get("/api/doctor/appointments/my_appointments/"),
@@ -41,8 +40,16 @@ const doctorApi = {
   getTodayConsultations: () => 
     axiosInstance.get("/api/doctor/consultations/today_consultations/"),
   
-  createConsultationFromAppointment: (appointmentId, data) => 
-    axiosInstance.post(`/api/doctor/consultations/${appointmentId}/create_consultation/`, data),
+  // NEW: Create consultation from appointment
+  createConsultationFromAppointment: (data) => 
+    axiosInstance.post("/api/doctor/consultations/create_from_appointment/", data),
+  
+  // NEW: Get consultation by appointment ID
+  getConsultationByAppointmentId: (appointmentId) => 
+    axiosInstance.get(`/api/doctor/consultations/by_appointment/${appointmentId}/`),
+  
+  getConsultationByToken: (tokenNo) => 
+    axiosInstance.get(`/api/doctor/consultations/by_token/?token_no=${tokenNo}`),
 
   // ============= Prescriptions =============
   getPrescriptions: () => 
@@ -60,6 +67,16 @@ const doctorApi = {
   getPatientPrescriptions: (patientId) => 
     axiosInstance.get(`/api/doctor/prescriptions/patient_prescriptions/?patient_id=${patientId}`),
 
+  // ============= Availability =============
+  getCurrentAvailability: () => 
+    axiosInstance.get("/api/doctor/availability/current_status/"),
+  
+  toggleAvailability: () => 
+    axiosInstance.post("/api/doctor/availability/toggle/"),  
+  
+  setAvailability: (status) => 
+    axiosInstance.post("/api/doctor/availability/set_status/", { status }),
+
   // ============= Medicines =============
   getAvailableMedicines: () => 
     axiosInstance.get("/api/doctor/medicines/"),
@@ -75,7 +92,7 @@ const doctorApi = {
     axiosInstance.get("/api/doctor/lab-test-requests/"),
   
   createLabTestRequest: (data) => 
-    axiosInstance.post("/api/doctor/lab-test-requests/request_lab_test/", data),
+    axiosInstance.post("/api/doctor/lab-test-requests/", data),
   
   updateLabTestRequest: (id, data) => 
     axiosInstance.patch(`/api/doctor/lab-test-requests/${id}/`, data),
@@ -109,7 +126,7 @@ const doctorApi = {
   getPatientAppointments: (patientId) =>
     axiosInstance.get(`/api/doctor/patients/${patientId}/appointments/`),
 
-  // ============= Doctor Profile (from auth API) =============
+  // ============= Doctor Profile =============
   getMyProfile: () => 
     axiosInstance.get("/api/auth/profile/"),
   
@@ -119,6 +136,58 @@ const doctorApi = {
   // ============= Dashboard Stats =============
   getDashboardStats: () => 
     axiosInstance.get("/api/doctor/dashboard/stats/"),
+
+  // ============= Patient Medical Info =============
+  getPatientMedicalInfo: (patientId) => {
+    console.log("Getting medical info for patient:", patientId);
+    return axiosInstance.get(`/api/doctor/patient-medical-info/by_patient/`, {
+      params: { patient_id: patientId }
+    });
+  },
+  
+  savePatientMedicalInfo: (patientId, data) => {
+    console.log("Saving medical info for patient:", patientId, data);
+    const requestData = {
+      patient: patientId,
+      ...data
+    };
+    return axiosInstance.post(`/api/doctor/patient-medical-info/`, requestData);
+  },
+  
+  updatePatientVitals: (patientId, vitals) => {
+    console.log("Updating vitals for patient:", patientId, vitals);
+    const requestData = {
+      patient_id: patientId,
+      ...vitals
+    };
+    return axiosInstance.post(`/api/doctor/patient-medical-info/update_vitals/`, requestData);
+  },
+
+  // ============= Consultation Completion =============
+  completeConsultation: (consultationId) => 
+    axiosInstance.post(`/api/doctor/consultations/${consultationId}/complete_consultation/`),
+  
+  getConsultationBill: (consultationId) => 
+    axiosInstance.get(`/api/doctor/consultations/${consultationId}/bill_info/`),
+  
+  // ============= Bills =============
+  getPatientBills: (patientId) => 
+    axiosInstance.get(`/api/receptionist/bills/?patient_id=${patientId}`),
+  
+  getConsultationBills: (consultationId) => 
+    axiosInstance.get(`/api/receptionist/bills/?consultation_id=${consultationId}`),
+
+  // ============= NEW: Start consultation (legacy support) =============
+  startConsultation: (data) => 
+    axiosInstance.post("/api/doctor/consultations/create_from_appointment/", data),
+
+  createConsultationFromAppointment: (data) => 
+    axiosInstance.post("/api/doctor/consultations/create_from_appointment/", data),
+  
+  // NEW: Get consultation by appointment ID
+  getConsultationByAppointmentId: (appointmentId) => 
+    axiosInstance.get(`/api/doctor/consultations/by_appointment/${appointmentId}/`),
+
 };
 
 export default doctorApi;

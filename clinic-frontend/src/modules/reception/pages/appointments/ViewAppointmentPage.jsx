@@ -185,7 +185,7 @@ const ViewAppointmentPage = () => {
               <span class="label">Name:</span> ${patient?.Patient_Name || 'N/A'}
             </div>
             <div class="value">
-              <span class="label">Patient ID:</span> PAT-${(patient?.PAT_ID || patient?.id).toString().padStart(6, '0')}
+              <span class="label">Patient ID:</span> PAT-${patient.PAT_ID || `PAT-${patient.id.toString().padStart(6, '0')}`}
             </div>
             <div class="value">
               <span class="label">Phone:</span> ${patient?.Phone_Number || 'N/A'}
