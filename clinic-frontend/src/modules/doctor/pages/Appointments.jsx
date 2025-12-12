@@ -213,23 +213,23 @@ const Appointments = () => {
       <div className="d-flex justify-content-between align-items-center mb-4">
         <div>
           <h3 className="mb-1">Appointments Management</h3>
-          <p className="text-muted mb-0">Manage and track patient appointments</p>
+          {/* <p className="text-muted mb-0">Manage and track patient appointments</p> */}
         </div>
         <div className="text-end">
           <div className="d-flex align-items-center gap-2">
-            <div className="text-end">
+            {/* <div className="text-end">
               <div className="text-muted small">Logged in as</div>
               <div className="fw-semibold">Dr. {staffDetail?.Name?.split(' ')[0] || 'Doctor'}</div>
-            </div>
-            <div className="avatar-sm bg-primary bg-opacity-10 rounded-circle d-flex align-items-center justify-content-center">
+            </div> */}
+            {/* <div className="avatar-sm bg-primary bg-opacity-10 rounded-circle d-flex align-items-center justify-content-center">
               <i className="bi bi-person fs-5 text-primary"></i>
-            </div>
+            </div> */}
           </div>
         </div>
       </div>
 
       {/* Quick Filters */}
-      <div className="card shadow-sm border-0 mb-4">
+      {/* <div className="card shadow-sm border-0 mb-4">
         <div className="card-body">
           <h5 className="card-title mb-3"><i className="bi bi-funnel me-2"></i>Quick Filters</h5>
           <form onSubmit={handleSearch}>
@@ -258,7 +258,7 @@ const Appointments = () => {
             </div>
           </form>
         </div>
-      </div>
+      </div> */}
 
       {/* Stats */}
       <div className="row mb-4">
@@ -385,13 +385,13 @@ const Appointments = () => {
                               Continue
                             </button>
                           )}
-                          <button
+                          {/* <button
                             className="btn btn-outline-secondary"
                             onClick={() => navigate(`/doctor/patient/${appointment.patient_id || appointment.PAT_ID}`)}
                             title="Patient Details"
                           >
                             <i className="bi bi-person"></i>
-                          </button>
+                          </button> */}
                         </div>
                       </td>
                     </tr>

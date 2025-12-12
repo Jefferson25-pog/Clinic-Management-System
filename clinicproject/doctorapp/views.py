@@ -196,7 +196,11 @@ class ConsultationDetailsViewSet(viewsets.ModelViewSet):
             date_to = request.query_params.get('date_to', None)
             days = request.query_params.get('days', None)
             
-            consultations = ConsultationDetail.objects.filter(DOC_ID=doctor_id)
+            # IMPORTANT: Only get COMPLETED consultations
+            consultations = ConsultationDetail.objects.filter(
+                DOC_ID=doctor_id,
+                Consultation_Status='completed'  # Only completed
+            )
             
             if patient_name:
                 consultations = consultations.filter(
@@ -298,9 +302,18 @@ class ConsultationDetailsViewSet(viewsets.ModelViewSet):
             # Find appointment
             appointment = None
             if appointment_id:
-                appointment = AppointmentDetail.objects.filter(APPOINTMENT_ID=appointment_id).first()
+                # Try different ways to find appointment
+                appointment = AppointmentDetail.objects.filter(
+                    APPOINTMENT_ID=appointment_id
+                ).first()
+                if not appointment:
+                    appointment = AppointmentDetail.objects.filter(
+                        id=appointment_id
+                    ).first()
             elif token_no:
-                appointment = AppointmentDetail.objects.filter(TOKEN_NO=token_no).first()
+                appointment = AppointmentDetail.objects.filter(
+                    TOKEN_NO=token_no
+                ).first()
             
             if not appointment:
                 return Response({
@@ -309,7 +322,9 @@ class ConsultationDetailsViewSet(viewsets.ModelViewSet):
                 }, status=status.HTTP_404_NOT_FOUND)
             
             # Check if consultation already exists
-            existing_consultation = ConsultationDetail.objects.filter(TOKEN_NO=appointment).first()
+            existing_consultation = ConsultationDetail.objects.filter(
+                TOKEN_NO=appointment
+            ).first()
             
             if existing_consultation:
                 # Return existing consultation
@@ -329,25 +344,32 @@ class ConsultationDetailsViewSet(viewsets.ModelViewSet):
             
             doctor_id = request.user.staff_detail.STAFF_ID
             
-            # Create new consultation
+            # Create new consultation WITHOUT specifying CONSULT_ID
+            # Let the model's save() method generate it automatically
             consultation = ConsultationDetail.objects.create(
                 TOKEN_NO=appointment,
                 DOC_ID_id=doctor_id,
-                Symptoms=appointment.Reason or '',  # Use appointment reason as initial symptoms
+                Symptoms=appointment.Reason or '',
                 Diagnosis='',
                 Description='',
-                Consultation_Status='in_progress',  # Start as in_progress
+                Consultation_Status='in_progress',
                 Consultation_Time=timezone.now()
             )
             
-            # Don't update appointment status yet (wait for completion)
-            # appointment.Status = 'Completed'  # REMOVE THIS
+            # Now check if the generated ID was saved
+            if consultation.CONSULT_ID:
+                print(f"Generated consultation ID: {consultation.CONSULT_ID}")
+            else:
+                # If still no ID, generate one manually
+                consultation.CONSULT_ID = consultation._generate_consultation_id()
+                consultation.save()
             
             serializer = self.get_serializer(consultation)
             return Response({
                 'exists': False,
                 'message': 'Consultation created successfully',
-                'consultation': serializer.data
+                'consultation': serializer.data,
+                'consultation_id': consultation.CONSULT_ID
             }, status=status.HTTP_201_CREATED)
             
         except Exception as e:

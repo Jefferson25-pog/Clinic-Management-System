@@ -250,9 +250,9 @@ class AppointmentDetailsViewSet(viewsets.ModelViewSet):
     filterset_fields = ['Status', 'Priority', 'Date', 'DOC_ID', 'PAT_ID']
     ordering_fields = ['Date', 'Time', 'Priority', 'created_at']
     ordering = ['Date', 'Time']
-    pagination_class = AppointmentPagination  # ADD THIS LINE
+    pagination_class = AppointmentPagination
+    lookup_field = 'APPOINTMENT_ID' # ADD THIS LINE
     
-    # Override get_queryset to handle date filtering better
     def get_queryset(self):
         queryset = super().get_queryset()
         
@@ -334,12 +334,48 @@ class AppointmentDetailsViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(appointments, many=True)
         return Response(serializer.data)
     
+    # Update the schedule_appointment method
     @action(detail=False, methods=['post'])
     def schedule_appointment(self, request):
-        serializer = self.get_serializer(data=request.data)
+        # Clean the request data
+        request_data = request.data.copy()
+        
+        # Remove auto-generated fields
+        auto_fields = ['APPOINTMENT_ID', 'TOKEN_NO', 'id', 'appointment_id', 'token_no']
+        for field in auto_fields:
+            request_data.pop(field, None)
+        
+        # Ensure time format has seconds
+        if 'Time' in request_data and ':' in request_data['Time']:
+            time_parts = request_data['Time'].split(':')
+            if len(time_parts) == 2:
+                request_data['Time'] = f"{request_data['Time']}:00"
+        
+        print("Cleaned request data:", request_data)  # Debug
+        
+        serializer = self.get_serializer(data=request_data)
         if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            try:
+                # Save the appointment
+                appointment = serializer.save()
+                
+                return Response({
+                    'message': 'Appointment scheduled successfully',
+                    'appointment_id': appointment.APPOINTMENT_ID,
+                    'token_no': appointment.TOKEN_NO,
+                    'data': AppointmentDetailsSerializer(appointment).data
+                }, status=status.HTTP_201_CREATED)
+                
+            except Exception as e:
+                import traceback
+                print("Error saving appointment:", str(e))
+                print("Traceback:", traceback.format_exc())  # Debug
+                return Response(
+                    {'error': f'Error saving appointment: {str(e)}'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+        
+        print("Serializer errors:", serializer.errors)  # Debug
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     @action(detail=False, methods=['get'])

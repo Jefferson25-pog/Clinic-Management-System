@@ -115,7 +115,7 @@ class AppointmentDetail(models.Model):
         ('Cancelled', 'Cancelled'),
     ]
     
-    APPOINTMENT_ID = models.CharField(max_length=20, primary_key=True, verbose_name="Appointment ID")
+    APPOINTMENT_ID = models.CharField(max_length=20, primary_key=True, verbose_name="Appointment ID", default='temp')
     TOKEN_NO = models.CharField(max_length=20, verbose_name="Token Number")
     PAT_ID = models.ForeignKey('PatientDetail', on_delete=models.CASCADE, related_name='appointments')
     DOC_ID = models.ForeignKey('adminapp.StaffDetail', on_delete=models.CASCADE, limit_choices_to={'Role': 'Doctor'})
@@ -140,49 +140,34 @@ class AppointmentDetail(models.Model):
     cancelled_by = models.CharField(max_length=50, blank=True, null=True)
     
     def save(self, *args, **kwargs):
-        is_new = not self.pk
-    
-        # Generate APPOINTMENT_ID if not provided (for new appointments only)
-        if is_new and not self.APPOINTMENT_ID:
-            today = date.today()
-            # Get appointments created today (based on created_at, not Date)
-            appointments_today = AppointmentDetail.objects.filter(created_at__date=today)
-        
-            if appointments_today.exists():
+        # Generate APPOINTMENT_ID if it's the default or doesn't exist
+        if not self.APPOINTMENT_ID or self.APPOINTMENT_ID == 'temp':
+            # Get the last appointment ID
+            last_appointment = AppointmentDetail.objects.order_by('APPOINTMENT_ID').last()
+            if last_appointment:
                 try:
-                    # Get max number from APPOINTMENT_ID
-                    max_num = 0
-                    for appointment in appointments_today:
-                        if appointment.APPOINTMENT_ID.startswith('APID-'):
-                            try:
-                                num = int(appointment.APPOINTMENT_ID.split('-')[1])
-                                max_num = max(max_num, num)
-                            except:
-                                pass
-                    new_num = max_num + 1
-                except:
-                    new_num = 1
+                    # Extract number from APID-XXXX format
+                    last_number = int(last_appointment.APPOINTMENT_ID.split('-')[1])
+                    new_number = last_number + 1
+                except (IndexError, ValueError):
+                    new_number = 1
             else:
-                new_num = 1
+                new_number = 1
+            
+            self.APPOINTMENT_ID = f"APID-{new_number:04d}"
         
-            self.APPOINTMENT_ID = f"APID-{new_num:04d}"
-    
-        # Generate TOKEN_NO if not provided (for new appointments only)
-        if is_new and not self.TOKEN_NO:
-            today = self.Date  # Use appointment date, not today's date
-            # Count appointments for the same date (excluding current appointment)
-            existing_tokens = AppointmentDetail.objects.filter(Date=today).exclude(pk=self.pk)
-            token_count = existing_tokens.count()
-            self.TOKEN_NO = f"TOK-{(token_count + 1):04d}"
-    
-    # Set completed_at or cancelled_at timestamps
-        if self.Status == 'Completed' and not self.completed_at:
-            self.completed_at = timezone.now()
-        elif self.Status == 'Cancelled' and not self.cancelled_at:
-            self.cancelled_at = timezone.now()
-            if not self.cancelled_by:
-                self.cancelled_by = 'System'
-    
+        # Generate TOKEN_NO (resets daily for each doctor)
+        if not self.TOKEN_NO:
+            date_str = self.Date.strftime('%y%m%d') if self.Date else timezone.now().strftime('%y%m%d')
+            
+            # Count today's appointments for this specific doctor
+            today_appointments = AppointmentDetail.objects.filter(
+                Date=self.Date,
+                DOC_ID=self.DOC_ID
+            ).exclude(APPOINTMENT_ID=self.APPOINTMENT_ID).count()  # Exclude current appointment
+            
+            self.TOKEN_NO = f"TOK-{date_str}-{today_appointments + 1:04d}"
+        
         super().save(*args, **kwargs)
     
     def clean(self):

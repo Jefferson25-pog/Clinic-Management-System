@@ -67,6 +67,10 @@ class AppointmentDetailsSerializer(serializers.ModelSerializer):
             'completed_at', 'cancelled_at', 'cancelled_by'
         ]
         read_only_fields = ['APPOINTMENT_ID', 'TOKEN_NO', 'created_at', 'updated_at']
+        extra_kwargs = {
+            'PAT_ID': {'write_only': True},  # Make PAT_ID write-only for creation
+            'DOC_ID': {'write_only': True},  # Make DOC_ID write-only for creation
+        }
     
     def validate_Date(self, value):
         if value < date.today():
@@ -106,7 +110,20 @@ class AppointmentDetailsSerializer(serializers.ModelSerializer):
                     "An appointment already exists for this patient with the same doctor on this date"
                 )
         
+        if 'APPOINTMENT_ID' in self.initial_data:
+            raise serializers.ValidationError(
+                {"APPOINTMENT_ID": "Appointment ID is auto-generated and should not be provided"}
+            )
+        
+        # Add validation to ensure TOKEN_NO is not manually provided
+        if 'TOKEN_NO' in self.initial_data:
+            raise serializers.ValidationError(
+                {"TOKEN_NO": "Token number is auto-generated and should not be provided"}
+            )
+        
         return data
+        
+    
 
 class BillDetailsSerializer(serializers.ModelSerializer):
     patient_name = serializers.CharField(source='CONSULT_ID.TOKEN_NO.PAT_ID.Patient_Name', read_only=True)

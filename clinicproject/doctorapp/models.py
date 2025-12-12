@@ -34,31 +34,19 @@ class ConsultationDetail(models.Model):
     def __str__(self):
         return f"Consultation {self.CONSULT_ID} - {self.TOKEN_NO.PAT_ID.Patient_Name} with Dr. {self.DOC_ID.Name}"
     
+    
     def save(self, *args, **kwargs):
-        is_new = not self.pk
+        # Handle ID generation for new records
+        is_new = self._state.adding  # Better way to check if new
         
-        # Auto-generate CONSULT_ID if not provided
-        if is_new and not self.CONSULT_ID:
-            today = date.today()
-            consultations_today = ConsultationDetail.objects.filter(Created_Date__date=today)
-            
-            if consultations_today.exists():
-                try:
-                    max_num = 0
-                    for consultation in consultations_today:
-                        if consultation.CONSULT_ID.startswith('CON-'):
-                            try:
-                                num = int(consultation.CONSULT_ID.split('-')[1])
-                                max_num = max(max_num, num)
-                            except:
-                                pass
-                    new_num = max_num + 1
-                except:
-                    new_num = 1
+        # Generate CONSULT_ID if new and not provided
+        if is_new:
+            if not self.CONSULT_ID:
+                self.CONSULT_ID = self._generate_consultation_id()
             else:
-                new_num = 1
-            
-            self.CONSULT_ID = f"CON-{new_num:04d}"
+                # If ID is provided but already exists, regenerate
+                if ConsultationDetail.objects.filter(CONSULT_ID=self.CONSULT_ID).exists():
+                    self.CONSULT_ID = self._generate_consultation_id()
         
         # Get old status if updating
         old_status = None
@@ -66,7 +54,7 @@ class ConsultationDetail(models.Model):
             try:
                 old_obj = ConsultationDetail.objects.get(pk=self.pk)
                 old_status = old_obj.Consultation_Status
-            except:
+            except ConsultationDetail.DoesNotExist:
                 pass
         
         # Save the consultation
@@ -75,6 +63,33 @@ class ConsultationDetail(models.Model):
         # If status changed to 'completed', handle completion
         if not is_new and old_status != 'completed' and self.Consultation_Status == 'completed':
             self._complete_consultation()
+
+    def _generate_consultation_id(self):
+        """Generate a unique consultation ID"""
+        # Find the highest existing CON-XXXX number
+        last_consultation = ConsultationDetail.objects.filter(
+            CONSULT_ID__startswith='CON-'
+        ).order_by('CONSULT_ID').last()
+        
+        if last_consultation:
+            try:
+                # Extract number from CON-XXXX format
+                last_number = int(last_consultation.CONSULT_ID.split('-')[1])
+                new_number = last_number + 1
+            except (IndexError, ValueError):
+                new_number = 1
+        else:
+            new_number = 1
+        
+        # Check if this ID already exists (just in case)
+        new_id = f"CON-{new_number:04d}"
+        
+        # If by chance it exists, find next available
+        while ConsultationDetail.objects.filter(CONSULT_ID=new_id).exists():
+            new_number += 1
+            new_id = f"CON-{new_number:04d}"
+        
+        return new_id
     
     def _complete_consultation(self):
         """Handle consultation completion"""
